@@ -3,26 +3,17 @@ Character level speech recognizer using ctc loss with deep rnns in TensorFlow.
 
 ###About
 
-This is an ongoing project, working towards an implementation of the charater-level ISR detailed
-by [Kyuyeon Hwang and Wonyong Sung](http://arxiv.org/pdf/1601.06581v2.pdf). It works at the character level using 1 deep rnn trained with ctc loss for the
-acoustic model, and one deep rnn trained for a character-level language model.
-
-The acoustic model reads in log mel frequency filterbank feature vectors with energy, delta and delta-delta values.
-(123-dim inputs).
+This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the [paper](http://arxiv.org/pdf/1601.06581v2.pdf)
+by Kyuyeon Hwang and Wonyong Sung. It works at the character level using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language model. The acoustic model reads in log mel frequency filterbank feature vectors with energy, delta and delta-delta values (123-dim inputs).
 
 The audio signal processing is done using jameslyons' [python_speech_features](https://github.com/jameslyons/python_speech_features),
-and this [MFCC tutorial](http://www.practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/)
+and this [MFCC tutorial](http://www.practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/).
 
-Currently only the acoustic model has been (mostly) completed. The character-level RNN-LM is in the works.
+Currently only the acoustic model has been (mostly) completed. The character-level RNN-LM is in the works. There is not as of yet any way to sample it using human testing (also in the works).
 
-There is not as of yet any way to sample it using human testing (also in the works).
 ###Data
 
-The data currently being used is [LibriSpeech](http://www.openslr.org/12/) by Vassil Panayotov.
-
-In the future the data processing pipeline will hopefully be generalized well enough to work with any speech data.
-
-The data is fed through two pipelines, one for testing, and the other for training. This is done asynchronously.
+The data currently being used is [LibriSpeech](http://www.openslr.org/12/) by Vassil Panayotov. In the future the data processing pipeline will hopefully be generalized well enough to work with any speech data. The data is fed through two pipelines, one for testing, and the other for training. This is done asynchronously.
 
 ###How to Run
 ####Install dependencies
