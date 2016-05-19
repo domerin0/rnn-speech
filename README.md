@@ -65,11 +65,11 @@ Dynamic RNNs are used as memory consumption on the entirely unrolled network was
 ###Project Road Map
 
 With verfication and testing performed somewhere at every step:
+
 1. Build character-level RNN code
 2. Add ctc beam search
 3. Wrap acoustic model and language model into general 'Speech Recognizer'
 4. Add ability for human to sample and test
-
 
 Ultimately I'd like to work towards bridging this with my other project [neural-chatbot](https://github.com/inikdom/neural-chatbot)
 to make an open-source natural conversational engine.
