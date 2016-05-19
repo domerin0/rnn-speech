@@ -76,7 +76,7 @@ def main():
 			args=(train_set, True))
 			async_train_loader.start()
 
-			step_loss = model.step(sess, step_batch_inputs[0], step_batch_inputs[1],
+			_, step_loss = model.step(sess, step_batch_inputs[0], step_batch_inputs[1],
 				step_batch_inputs[2], step_batch_inputs[3],
 				step_batch_inputs[4],forward_only=False)
 
@@ -93,7 +93,7 @@ def main():
 					sess.run(model.learning_rate_decay_op)
 				previous_losses.append(loss)
 
-				checkpoint_path = os.path.join(path, "acousticmodel.ckpt")
+				checkpoint_path = os.path.join(FLAGS.checkpoint_dir, "acousticmodel.ckpt")
 				model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 				step_time, loss = 0.0, 0.0
 				#begin loading test data async
@@ -112,7 +112,7 @@ def main():
 					target=model.getBatch,
 					args=(train_set, False))
 					async_train_loader.start()
-					loss = model.step(sess, eval_inputs[0], eval_inputs[1],
+					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
 					print("\tTest: loss %.2f" % (loss))

@@ -104,7 +104,7 @@ class AcousticModel(object):
         #compute ctc loss
         self.ctc_loss = ctc.ctc_loss(tf.pack(self.logits), sparse_labels,
             self.target_seq_lengths)
-
+        self.mean_loss = tf.reduce_mean(self.ctc_loss)
         params = tf.trainable_variables()
 
         if not forward_only:
@@ -218,11 +218,11 @@ class AcousticModel(object):
         input_feed[self.target_indices.name] = np.array(target_indices)
         input_feed[self.target_vals.name] = target_vals
         if not forward_only:
-            output_feed = [self.ctc_loss, self.update]
+            output_feed = [self.ctc_loss, self.update, self.mean_loss]
         else:
-            output_feed = [self.ctc_loss]
+            output_feed = [self.ctc_loss, self.mean_loss]
         outputs = session.run(output_feed, input_feed)
         if not forward_only:
-            return outputs[0]
+            return outputs[0], outputs[2]
         else:
-            return outputs[0]
+            return outputs[0], outputs[1]
