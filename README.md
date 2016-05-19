@@ -41,8 +41,10 @@ sox is used for the dataset to convert the files from flac to wav as that was th
 
 I've prepared a bash script to download (~700mb) and extract the data to the right place:
 
-``$ chmod +x prepare_data.sh``
-``$ ./prepare_data.sh``
+````
+$ chmod +x prepare_data.sh
+$ ./prepare_data.sh
+````
 
 It will remove the tar files after downloading and unzipping.
 
@@ -60,7 +62,7 @@ Once your dependencies are set up, and data is downloaded and extracted into the
 
 ``$ python train.py``
 
-Dynamic RNNs are used as memory consumption on the entirely unrolled network was massive, and the model would take 30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it (as the model can now fit on an actual GPU).
+Dynamic RNNs are used as memory consumption on the entirely unrolled network was massive, and the model would take 30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it (as the model can now fit on a single GPU).
 
 ###Project Road Map
 
