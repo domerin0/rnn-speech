@@ -33,8 +33,6 @@ class AcousticModel(object):
         input_dim - dimension of input vector
         forward_only - whether to build back prop nodes or not
         '''
-        self.train_batch_pointer = 0
-        self.test_batch_pointer = 0
         self.dropout = dropout
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
@@ -93,8 +91,8 @@ class AcousticModel(object):
         b_o = tf.get_variable("output_b", [num_labels])
 
         #compute logits
-        self.logits = [tf.nn.xw_plus_b(tf.squeeze(i),
-        w_o, b_o) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
+        self.logits = [tf.nn.softmax(tf.nn.xw_plus_b(tf.squeeze(i),
+        w_o, b_o)) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
         #setup sparse tensor for input into ctc loss
         sparse_labels = tf.SparseTensor(
         indices=self.target_indices,
@@ -103,7 +101,7 @@ class AcousticModel(object):
 
         #compute ctc loss
         self.ctc_loss = ctc.ctc_loss(tf.pack(self.logits), sparse_labels,
-            self.target_seq_lengths)
+            self.input_seq_lengths)
         self.mean_loss = tf.reduce_mean(self.ctc_loss)
         params = tf.trainable_variables()
 
@@ -117,7 +115,7 @@ class AcousticModel(object):
 
         self.saver = tf.train.Saver(tf.all_variables())
 
-    def getBatch(self, dataset, is_train = False):
+    def getBatch(self, dataset, batch_pointer, is_train):
         '''
         Inputs:
         dataset - tuples of (numpy file, transribed_text)
@@ -125,10 +123,7 @@ class AcousticModel(object):
         input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
         '''
-        if is_train:
-            already_processed = self.batch_size * self.train_batch_pointer
-        else:
-            already_processed = self.batch_size * self.test_batch_pointer
+        already_processed = self.batch_size * batch_pointer
         num_data_points = min(self.batch_size, len(dataset[already_processed:]))
         to_process = dataset[already_processed:already_processed+num_data_points]
         input_feat_vecs = []
@@ -160,25 +155,19 @@ class AcousticModel(object):
 
         remaining = len(dataset) - (already_processed + num_data_points)
         if remaining == 0:
-            if is_train:
-                self.train_batch_pointer = 0
-            else:
-                self.test_batch_pointer = 0
+            batch_pointer = 0
         else:
-            if is_train:
-                self.train_batch_pointer += 1
-            else:
-                self.train_batch_pointer += 1
+            batch_pointer += 1
         input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
         if is_train and self.train_conn != None:
             self.train_conn.send([input_feat_vecs, input_feat_vec_lengths,
-                target_lengths, np.array(target_labels).flatten(), target_indices])
+                target_lengths, target_labels, target_indices, batch_pointer])
         elif not is_train and self.test_conn != None:
             self.test_conn.send([input_feat_vecs, input_feat_vec_lengths,
-                target_lengths, target_labels, target_indices])
+                target_lengths, target_labels, target_indices, batch_pointer])
         else:
             return [input_feat_vecs, input_feat_vec_lengths,
-                target_lengths, np.array(target_labels).flatten(), target_indices]
+                target_lengths, target_labels, target_indices, batch_pointer]
 
     def initializeAudioProcessor(self, max_input_seq_length):
         self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
