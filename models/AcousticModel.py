@@ -91,8 +91,8 @@ class AcousticModel(object):
         b_o = tf.get_variable("output_b", [num_labels])
 
         #compute logits
-        self.logits = [tf.nn.xw_plus_b(tf.squeeze(i),
-        w_o, b_o) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
+        self.logits = [tf.nn.softmax(tf.nn.xw_plus_b(tf.squeeze(i),
+        w_o, b_o)) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
         #setup sparse tensor for input into ctc loss
         sparse_labels = tf.SparseTensor(
         indices=self.target_indices,
@@ -101,7 +101,7 @@ class AcousticModel(object):
 
         #compute ctc loss
         self.ctc_loss = ctc.ctc_loss(tf.pack(self.logits), sparse_labels,
-            self.target_seq_lengths)
+            self.input_seq_lengths)
         self.mean_loss = tf.reduce_mean(self.ctc_loss)
         params = tf.trainable_variables()
 
