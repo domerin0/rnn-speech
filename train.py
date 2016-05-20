@@ -56,9 +56,12 @@ def main():
 		model.setConnections(child_test_conn, child_train_conn)
 		num_test_batches = model.getNumBatches(test_set)
 
+		train_batch_pointer = 0
+		test_batch_pointer = 0
+
 		async_train_loader = Process(
 		target=model.getBatch,
-		args=(train_set, True))
+		args=(train_set, train_batch_pointer, True))
 		async_train_loader.start()
 
 		step_time, loss = 0.0, 0.0
@@ -70,16 +73,19 @@ def main():
 			#receive batch from pipe
 			step_batch_inputs = parent_train_conn.recv()
 			async_train_loader.join()
+
+			train_batch_pointer = step_batch_inputs[5]
+
 			#begin fetching other batch while graph processes previous one
 			async_train_loader = Process(
 			target=model.getBatch,
-			args=(train_set, True))
+			args=(train_set, train_batch_pointer, True))
 			async_train_loader.start()
-
+			#print step_batch_inputs[0]
 			_, step_loss = model.step(sess, step_batch_inputs[0], step_batch_inputs[1],
 				step_batch_inputs[2], step_batch_inputs[3],
 				step_batch_inputs[4],forward_only=False)
-
+			#print _
 			step_time += (time.time() - start_time) / hyper_params["steps_per_checkpoint"]
 			loss += step_loss / hyper_params["steps_per_checkpoint"]
 			current_step += 1
@@ -100,22 +106,24 @@ def main():
 				#(uses different pipline than train data)
 				async_test_loader = Process(
 				target=model.getBatch,
-				args=(train_set, False))
+				args=(train_set, test_batch_pointer, False))
 				async_test_loader.start()
 
 				for i in range(num_test_batches):
 					eval_inputs = parent_test_conn.recv()
 					async_test_loader.join()
+					test_batch_pointer = eval_inputs[5]
 					#tell audio processor to go get another batch ready
 					#while we run last one through the graph
 					async_train_loader = Process(
 					target=model.getBatch,
-					args=(train_set, False))
+					args=(train_set, test_batch_pointer, False))
 					async_train_loader.start()
+
 					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
-					print("\tTest: loss %.2f" % (loss))
+				print("\tTest: loss %.2f" % (loss))
 				sys.stdout.flush()
 
 
