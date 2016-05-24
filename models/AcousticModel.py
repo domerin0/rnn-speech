@@ -91,8 +91,8 @@ class AcousticModel(object):
         b_o = tf.get_variable("output_b", [num_labels])
 
         #compute logits
-        self.logits = [tf.nn.softmax(tf.nn.xw_plus_b(tf.squeeze(i),
-        w_o, b_o)) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
+        self.logits = [tf.nn.xw_plus_b(tf.squeeze(i),
+        w_o, b_o) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
         #setup sparse tensor for input into ctc loss
         sparse_labels = tf.SparseTensor(
         indices=self.target_indices,
@@ -141,6 +141,7 @@ class AcousticModel(object):
                 feat_vec = feat_vec[:self.max_input_seq_length]
                 feat_vec_length = self.max_input_seq_length
             input_feat_vecs.append(feat_vec)
+            assert feat_vec_length <= self.max_input_seq_length, "{0} not less than {1}".format(feat_vec_length, self.max_input_seq_length)
             input_feat_vec_lengths.append(feat_vec_length)
             #compute sparse tensor inputs
             if len(labels) > self.max_target_seq_length:
@@ -150,6 +151,8 @@ class AcousticModel(object):
             target_labels += labels
             target_lengths.append(len(labels))
             batch_counter += 1
+            #assert len(target_indices) <= self.max_target_seq_length, "target_indices is not less than {0}".format(len(target_indices))
+            #assert len(target_labels) <= self.max_target_seq_length, "target_labels is not less than {0}".format(len(target_labels))
             assert len(labels) <= self.max_target_seq_length
             assert len(feat_vec) <= self.max_input_seq_length
 

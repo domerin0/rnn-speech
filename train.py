@@ -38,9 +38,9 @@ def main():
 		FLAGS.raw_data_dir, hyper_params)
 	text_audio_pairs = data_processor.run()
 	num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
-	train_set = text_audio_pairs[num_train:]
-	test_set = text_audio_pairs[:num_train]
-
+	train_set = text_audio_pairs[:num_train]
+	test_set = text_audio_pairs[num_train:]
+	print "Using {0} size of test set".format(len(test_set))
 	#setting up piplines to be able to load data async (one for test set, one for train)
 	#TODO tensorflow probably has something built in for this, look into it
 	parent_train_conn, child_train_conn = Pipe()
@@ -54,7 +54,9 @@ def main():
 		model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
 		print "Setting up piplines to test and train data..."
 		model.setConnections(child_test_conn, child_train_conn)
+
 		num_test_batches = model.getNumBatches(test_set)
+		num_train_batches = model.getNumBatches(train_set)
 
 		train_batch_pointer = 0
 		test_batch_pointer = 0
@@ -74,7 +76,7 @@ def main():
 			step_batch_inputs = parent_train_conn.recv()
 			async_train_loader.join()
 
-			train_batch_pointer = step_batch_inputs[5]
+			train_batch_pointer = step_batch_inputs[5] % num_train_batches
 
 			#begin fetching other batch while graph processes previous one
 			async_train_loader = Process(
@@ -106,20 +108,19 @@ def main():
 				#(uses different pipline than train data)
 				async_test_loader = Process(
 				target=model.getBatch,
-				args=(train_set, test_batch_pointer, False))
+				args=(test_set, test_batch_pointer, False))
 				async_test_loader.start()
 
 				for i in range(num_test_batches):
 					eval_inputs = parent_test_conn.recv()
 					async_test_loader.join()
-					test_batch_pointer = eval_inputs[5]
+					test_batch_pointer = eval_inputs[5] % num_test_batches
 					#tell audio processor to go get another batch ready
 					#while we run last one through the graph
 					async_train_loader = Process(
 					target=model.getBatch,
-					args=(train_set, test_batch_pointer, False))
+					args=(test_set, test_batch_pointer, False))
 					async_train_loader.start()
-
 					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
