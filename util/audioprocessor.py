@@ -54,6 +54,7 @@ class AudioProcessor(object):
         feat_vec_length = len(feat_vec)
         if feat_vec_length > self.max_input_seq_length:
             feat_vec = feat_vec[:self.max_input_seq_length]
+            feat_vec_length = len(feat_vec)
         elif feat_vec_length <= self.max_input_seq_length:
             pad_length = self.max_input_seq_length - len(feat_vec)
             padding = np.zeros((pad_length, 123), dtype=np.float)
