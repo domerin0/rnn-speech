@@ -91,7 +91,6 @@ def main():
 			step_time += (time.time() - start_time) / hyper_params["steps_per_checkpoint"]
 			loss += step_loss / hyper_params["steps_per_checkpoint"]
 			current_step += 1
-
 			if current_step % hyper_params["steps_per_checkpoint"] == 0:
 				print ("global step %d learning rate %.4f step-time %.2f loss "
 					"%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
@@ -117,15 +116,17 @@ def main():
 					test_batch_pointer = eval_inputs[5] % num_test_batches
 					#tell audio processor to go get another batch ready
 					#while we run last one through the graph
-					async_train_loader = Process(
+					async_test_loader = Process(
 					target=model.getBatch,
 					args=(test_set, test_batch_pointer, False))
-					async_train_loader.start()
+					async_test_loader.start()
 					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
 				print("\tTest: loss %.2f" % (loss))
 				sys.stdout.flush()
+				#eval_inputs = parent_test_conn.recv()
+				#async_test_loader.join()
 
 
 def createAcousticModel(session, hyper_params):
