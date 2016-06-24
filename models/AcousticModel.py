@@ -84,7 +84,7 @@ class AcousticModel(object):
         #build rnn
         rnn_output, self.hidden_state = rnn.dynamic_rnn(cell, tf.pack(inputs),
         sequence_length=self.input_seq_lengths, initial_state=initial_state,
-        time_major=True, parallel_iterations=100)
+        time_major=True, parallel_iterations=1000)
 
         #build output layer
         w_o = tf.get_variable("output_w", [hidden_size, num_labels])
