@@ -75,10 +75,10 @@ class DataProcessor(object):
                     text_file in files if text_file.endswith(".txt")]
                 if len(wav_audio_files) == 0:
                     will_convert = True
-                    audio_files = wav_audio_files
+                    audio_files = flac_audio_files
                 else:
                     will_convert = False
-                    audio_files = flac_audio_files
+                    audio_files = wav_audio_files
                 if len(audio_files) >= 1 and len(text_files) >= 1:
                     assert len(text_files) == 1, "Issue detected with data directory structure..."
                     with open(text_files[0], "r") as f:
@@ -86,7 +86,7 @@ class DataProcessor(object):
                         for a_file in audio_files:
                             #this might only work on linux
                             audio_file_name = os.path.basename(a_file)
-                            head = audio_file_name.replace(".flac", "")
+                            head = audio_file_name.replace(".flac", "").replace(".wav", "")
                             for line in lines:
                                 if head in line:
                                     text = line.replace(head, "").strip().lower() + "_"
