@@ -71,7 +71,6 @@ def main():
 		previous_losses = []
 		while True:
 			#begin timer
-			print "Step {0}".format(current_step)
 			start_time = time.time()
 			#receive batch from pipe
 			step_batch_inputs = parent_train_conn.recv()
@@ -89,6 +88,7 @@ def main():
 				step_batch_inputs[2], step_batch_inputs[3],
 				step_batch_inputs[4],forward_only=False)
 			#print _
+			print "Step {0} with loss {1}".format(current_step, step_loss)
 			step_time += (time.time() - start_time) / hyper_params["steps_per_checkpoint"]
 			loss += step_loss / hyper_params["steps_per_checkpoint"]
 			current_step += 1
@@ -122,15 +122,11 @@ def main():
 						async_test_loader = Process(
 						target=model.getBatch,
 						args=(test_set, test_batch_pointer, False))
-						async_test_loader.start()
 					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
 				print("\tTest: loss %.2f" % (loss))
 				sys.stdout.flush()
-				#eval_inputs = parent_test_conn.recv()
-				#async_test_loader.join()
-
 
 def createAcousticModel(session, hyper_params):
 	num_labels = 31
@@ -156,6 +152,8 @@ def checkGetHyperParamDic():
 	'''
 	Retrieves hyper parameter information from either config file or checkpoint
 	'''
+	if not os.path.exists(FLAGS.checkpoint_dir):
+		os.makedirs(FLAGS.checkpoint_dir)
 	serializer = hyperparams.HyperParameterHandler(FLAGS.checkpoint_dir)
 	hyper_params = readConfigFile()
 	if serializer.checkExists():
