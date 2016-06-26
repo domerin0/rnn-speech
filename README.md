@@ -66,3 +66,7 @@ With verfication and testing performed somewhere at every step:
 
 Ultimately I'd like to work towards bridging this with my other project [neural-chatbot](https://github.com/inikdom/neural-chatbot)
 to make an open-source natural conversational engine.
+
+###License
+
+MIT
