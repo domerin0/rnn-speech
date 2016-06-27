@@ -89,22 +89,23 @@ class AudioProcessor(object):
         Implementation of this based on formula found at:
         http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/
         '''
-        deltas = []
-        for feat_vec in fbank_feat:
-            row = []
-            for i in range(len(feat_vec)):
-                top_sum, bottom_sum = 0.0, 0.0
-                for n in range(1, N+1):
-                    if i-n < 0:
-                        top_sum += n * (feat_vec[i + n])
-                    elif i+n >= len(feat_vec):
-                        top_sum += n * (feat_vec[i - n])
-                    else:
-                        top_sum += n * (feat_vec[i + n] - feat_vec[i - n])
-                    bottom_sum += n*n
-                row.append(top_sum / (2.0 * bottom_sum))
-            deltas.append(row)
-        return np.array(deltas)
+        frames = []
+        for i, feat_vec in enumerate(fbank_frames):
+            deltas = []
+            # If there are not enough side frames, we put
+            # 0s in for the deltas
+            if (i - N < 0 or i + N > (len(fbank_frames) - 1)):
+                frames.append([0] * len(feat_vec))
+            else:
+                for ii in range(len(feat_vec)):
+                    top_sum, bottom_sum = 0.0, 0.0
+                    for n in range(1, N+1):
+                        top_sum += n * (fbank_frames[i+n][ii] -
+                                        fbank_frames[i-n][ii])
+                        bottom_sum += n*n
+                    deltas.append(top_sum / (2.0 * bottom_sum))
+                frames.append(deltas)
+        return np.array(frames)
 
     def convertFlac2Wav(self, file_name):
         '''
