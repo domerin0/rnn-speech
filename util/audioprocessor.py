@@ -84,7 +84,7 @@ class AudioProcessor(object):
         assert len(feat_vec[0]) == 123, "Something wrong with feature vector dimensions..."
         return feat_vec
 
-    def computeDeltas(self, fbank_feat, N=2):
+    def computeDeltas(self, fbank_frames, N=2):
         '''
         Implementation of this based on formula found at:
         http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/
