@@ -123,7 +123,6 @@ def main():
 							target=model.getBatch,
 							args=(test_set, test_batch_pointer, False))
 						async_test_loader.start()
-					else:
 					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
