@@ -112,7 +112,7 @@ def main():
 				async_test_loader.start()
 				print num_test_batches
 				for i in range(num_test_batches):
-						num_test_batches, i)
+					print "On {0}th training iteration".format(i)
 					eval_inputs = parent_test_conn.recv()
 					#async_test_loader.join()
 					test_batch_pointer = eval_inputs[5] % num_test_batches
