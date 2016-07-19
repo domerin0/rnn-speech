@@ -107,10 +107,10 @@ def main():
 				#begin loading test data async
 				#(uses different pipline than train data)
 				async_test_loader = Process(
-				target=model.getBatch,
-				args=(test_set, test_batch_pointer, False))
+					target=model.getBatch,
+					args=(test_set, test_batch_pointer, False))
 				async_test_loader.start()
-
+				print num_test_batches
 				for i in range(num_test_batches):
 					print "On {0}th training iteration".format(i)
 					eval_inputs = parent_test_conn.recv()
@@ -120,8 +120,9 @@ def main():
 					#while we run last one through the graph
 					if  i != num_test_batches - 1 :
 						async_test_loader = Process(
-						target=model.getBatch,
-						args=(test_set, test_batch_pointer, False))
+							target=model.getBatch,
+							args=(test_set, test_batch_pointer, False))
+						async_test_loader.start()
 					_, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
 						eval_inputs[2], eval_inputs[3],
 						eval_inputs[4],forward_only=True)
