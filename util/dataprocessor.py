@@ -45,7 +45,8 @@ class DataProcessor(object):
         if will_convert:
             audio_processor = audioprocessor.AudioProcessor(1)
             for audio_file_name in audio_file_text_pairs:
-                audio_processor.convertAndDeleteFLAC(audio_file_name[0].replace(".wav", ".flac"))
+                if audio_file_name[0].endswith(".flac"):
+                    audio_processor.convertAndDeleteFLAC(audio_file_name[0])
 
         #print audio_file_text_pairs[-20:]
 
@@ -63,9 +64,13 @@ class DataProcessor(object):
 
     def getFileNameTextPairs(self):
         '''
-        Gets and returns a list of tuples (audio_file_name, transcribed_text)
+        Returns
+          a list of tuples (audio_file_name, transcribed_text)
+          a boolean if some files need to be converted to wav
         '''
         audio_file_text_pairs = []
+        # Assume there will not need any conversion
+        will_convert = False
         for d in self.data_dirs:
             root_search_path = os.path.join(self.raw_data_path, d)
             for root, subdirs, files in os.walk(root_search_path):
@@ -73,25 +78,22 @@ class DataProcessor(object):
                 wav_audio_files = [os.path.join(root, audio_file) for audio_file in files if audio_file.endswith(".wav")]
                 text_files = [os.path.join(root, text_file) for
                     text_file in files if text_file.endswith(".txt")]
-                if len(wav_audio_files) == 0:
+                if len(flac_audio_files) > 0:
+                    # We have at least one file to convert
                     will_convert = True
-                    audio_files = flac_audio_files
-                else:
-                    will_convert = False
-                    audio_files = wav_audio_files
+                audio_files = wav_audio_files + flac_audio_files
                 if len(audio_files) >= 1 and len(text_files) >= 1:
                     assert len(text_files) == 1, "Issue detected with data directory structure..."
                     with open(text_files[0], "r") as f:
                         lines = f.read().split("\n")
                         for a_file in audio_files:
-                            #this might only work on linux
+                            # This might only work on linux
                             audio_file_name = os.path.basename(a_file)
                             head = audio_file_name.replace(".flac", "").replace(".wav", "")
                             for line in lines:
                                 if head in line:
                                     text = line.replace(head, "").strip().lower() + "_"
-                                    audio_file_text_pairs.append((a_file.replace(".flac",
-                                        ".wav"), text))
+                                    audio_file_text_pairs.append((a_file, text))
                                     break
         return audio_file_text_pairs, will_convert
 
