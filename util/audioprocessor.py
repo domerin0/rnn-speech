@@ -13,6 +13,7 @@ import scipy.io.wavfile as wav
 import numpy as np
 import os
 
+
 class AudioProcessor(object):
     def __init__(self, max_input_seq_length):
         self.master_file_list = "master_file_list.txt"
@@ -26,6 +27,7 @@ class AudioProcessor(object):
                 if counter % 100 == 0:
                     print "Processing file {0}... on thread {1}".format(counter,
                         thread_num)
+                # TODO : check following code because self.max_target_seq_length does not exist...
                 if len(file_name[1]) > self.max_target_seq_length:
                     continue
                 wav_file = self.convertFlac2Wav(file_name[0])
@@ -39,7 +41,7 @@ class AudioProcessor(object):
                     feat_vec = np.concatenate((feat_vec, padding), 0)
                     assert len(feat_vec) == self.max_input_seq_length, "Padding incorrect..."
                 self.deleteWav(wav_file)
-                #save feature vector
+                # save feature vector
                 array_file_name = os.path.basename(file_name[0]).replace(".flac", ".npy")
                 np.save(os.path.join(output_dir, array_file_name), feat_vec)
                 f.write("{0}, {1}\n".format(array_file_name,
