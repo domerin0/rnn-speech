@@ -43,14 +43,20 @@ class DataProcessor(object):
         shuffle(audio_file_text_pairs)
 
         if will_convert:
+            audio_file_text_pairs_final = []
             audio_processor = audioprocessor.AudioProcessor(1)
             for audio_file_name in audio_file_text_pairs:
                 if audio_file_name[0].endswith(".flac"):
                     audio_processor.convertAndDeleteFLAC(audio_file_name[0])
+                    audio_file_text_pairs_final.append((audio_file_name[0].replace(".flac", ".wav"), audio_file_name[1]))
+                else:
+                    audio_file_text_pairs_final.append((audio_file_name[0], audio_file_name[1]))
+        else:
+            audio_file_text_pairs_final = audio_file_text_pairs
 
         #print audio_file_text_pairs[-20:]
 
-        return audio_file_text_pairs
+        return audio_file_text_pairs_final
 
     def readInMetaInformation(self):
         file_info = []
