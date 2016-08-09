@@ -6,9 +6,7 @@ values
 The feature vectors
 are extracted every 10 ms with 25 ms Hamming window
 '''
-from features import mfcc
-from features import logfbank
-from features import fbank
+from python_speech_features import fbank
 import scipy.io.wavfile as wav
 import numpy as np
 import os
