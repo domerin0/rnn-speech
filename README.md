@@ -20,6 +20,7 @@ The data currently being used is [LibriSpeech](http://www.openslr.org/12/) by Va
 
 1. [TensorFlow](https://www.tensorflow.org/versions/r0.8/get_started/os_setup.html) (0.8)
 2. sox (available on both Mac and Linux)
+3. python_speech_features (pip install python_speech_features)
 
 #####For Mac
 `$ brew install sox --with-flac`

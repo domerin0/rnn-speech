@@ -9,12 +9,8 @@ import tensorflow as tf
 from tensorflow.python.platform import gfile
 from models.AcousticModel import *
 import sys
-import math
 import os
-import random
 import time
-from six.moves import xrange
-import util.audioprocessor as audioprocessor
 import util.dataprocessor as dataprocessor
 import util.hyperparams as hyperparams
 import ConfigParser

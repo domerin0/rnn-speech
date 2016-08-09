@@ -9,9 +9,7 @@ Curently it will only work for one specific dataset.
 import os
 from random import shuffle
 import util.audioprocessor as audioprocessor
-#import multiprocessor
-from math import floor
-from multiprocessing import Process, Lock
+
 
 class DataProcessor(object):
     def __init__(self, data_path, raw_data_path, config_dic):
@@ -20,26 +18,26 @@ class DataProcessor(object):
         self.config_dic = config_dic
 
     def run(self):
-        #First make output directories
+        # First make output directories
         self.setupProcessedDataDirs()
 
-        #check if processor needs to be run
+        # Check if processor needs to be run
         if os.path.exists(os.path.join(self.train_dir, "master_text_file.txt"))\
             and os.path.exists(os.path.join(self.test_dir, "master_text_file.txt")):
             print "No need to run data processor..."
             return
 
-        #next check which data folders are present
+        # Next check which data folders are present
         self.data_dirs = self.checkWhichDataFoldersArePresent()
         if len(self.data_dirs) == 0:
             print "Something went wrong, no data detected, check data directory.."
             return
 
-        #get pairs of (audio_file_name, transcribed_text)
+        # Get pairs of (audio_file_name, transcribed_text)
         print "Figuring out which files need to be processed..."
         audio_file_text_pairs, will_convert = self.getFileNameTextPairs()
         print "Using {0} files in total dataset...".format(len(audio_file_text_pairs))
-        #shuffle pairs
+        # Shuffle pairs
         shuffle(audio_file_text_pairs)
 
         if will_convert:
@@ -53,8 +51,6 @@ class DataProcessor(object):
                     audio_file_text_pairs_final.append((audio_file_name[0], audio_file_name[1]))
         else:
             audio_file_text_pairs_final = audio_file_text_pairs
-
-        #print audio_file_text_pairs[-20:]
 
         return audio_file_text_pairs_final
 
