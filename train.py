@@ -5,7 +5,6 @@ This entire project is based on the model described by the paper:
 http://arxiv.org/pdf/1601.06581v2.pdf
 '''
 
-import tensorflow as tf
 from tensorflow.python.platform import gfile
 from models.AcousticModel import *
 import sys
@@ -13,7 +12,10 @@ import os
 import time
 import util.dataprocessor as dataprocessor
 import util.hyperparams as hyperparams
-import ConfigParser
+try:
+    import ConfigParser as configparser
+except ImportError:
+    import configparser
 from multiprocessing import Process, Pipe
 from math import floor
 
@@ -28,15 +30,15 @@ flags.DEFINE_string("raw_data_dir", "data/LibriSpeech/", "Path to unprocessed da
 
 def main():
     hyper_params = checkGetHyperParamDic()
-    print "Using checkpoint {0}".format(FLAGS.checkpoint_dir)
-    print "Using hyper params: {0}".format(hyper_params)
+    print("Using checkpoint {0}".format(FLAGS.checkpoint_dir))
+    print("Using hyper params: {0}".format(hyper_params))
     data_processor = dataprocessor.DataProcessor(FLAGS.data_dir,
                                                  FLAGS.raw_data_dir, hyper_params)
     text_audio_pairs = data_processor.run()
     num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
     train_set = text_audio_pairs[:num_train]
     test_set = text_audio_pairs[num_train:]
-    print "Using {0} size of test set".format(len(test_set))
+    print("Using {0} size of test set".format(len(test_set)))
     # setting up piplines to be able to load data async (one for test set, one for train)
     # TODO tensorflow probably has something built in for this, look into it
     parent_train_conn, child_train_conn = Pipe()
@@ -44,11 +46,11 @@ def main():
 
     with tf.Session() as sess:
         # create model
-        print "Building model... (this takes a while)"
+        print("Building model... (this takes a while)")
         model = createAcousticModel(sess, hyper_params)
-        print "Setting up audio processor..."
+        print("Setting up audio processor...")
         model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
-        print "Setting up piplines to test and train data..."
+        print("Setting up piplines to test and train data...")
         model.setConnections(child_test_conn, child_train_conn)
 
         num_test_batches = model.getNumBatches(test_set)
@@ -84,12 +86,12 @@ def main():
                                       step_batch_inputs[2], step_batch_inputs[3],
                                       step_batch_inputs[4], forward_only=False)
             # print _
-            print "Step {0} with loss {1}".format(current_step, step_loss)
+            print("Step {0} with loss {1}".format(current_step, step_loss))
             step_time += (time.time() - start_time) / hyper_params["steps_per_checkpoint"]
             loss += step_loss / hyper_params["steps_per_checkpoint"]
             current_step += 1
             if current_step % hyper_params["steps_per_checkpoint"] == 0:
-                print ("global step %d learning rate %.4f step-time %.2f loss "
+                print("global step %d learning rate %.4f step-time %.2f loss "
                        "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
                                  step_time, loss))
                 # Decrease learning rate if no improvement was seen over last 3 times.
@@ -106,9 +108,9 @@ def main():
                     target=model.getBatch,
                     args=(test_set, test_batch_pointer, False))
                 async_test_loader.start()
-                print num_test_batches
+                print(num_test_batches)
                 for i in range(num_test_batches):
-                    print "On {0}th training iteration".format(i)
+                    print("On {0}th training iteration".format(i))
                     eval_inputs = parent_test_conn.recv()
                     # async_test_loader.join()
                     test_batch_pointer = eval_inputs[5] % num_test_batches
@@ -139,10 +141,10 @@ def createAcousticModel(session, hyper_params):
                           forward_only=False)
     ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
-        print "Reading model parameters from {0}".format(ckpt.model_checkpoint_path)
+        print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
-        print "Created model with fresh parameters."
+        print("Created model with fresh parameters.")
         session.run(tf.initialize_all_variables())
     return model
 
@@ -159,7 +161,7 @@ def checkGetHyperParamDic():
         if serializer.checkChanged(hyper_params):
             if not hyper_params["use_config_file_if_checkpoint_exists"]:
                 hyper_params = serializer.getParams()
-                print "Restoring hyper params from previous checkpoint..."
+                print("Restoring hyper params from previous checkpoint...")
             else:
                 new_checkpoint_dir = "{0}_hidden_size_{1}_numlayers_{2}_dropout_{3}".format(
                     int(time.time()),
@@ -173,10 +175,10 @@ def checkGetHyperParamDic():
                 serializer = hyperparams.HyperParameterHandler(FLAGS.checkpoint_dir)
                 serializer.saveParams(hyper_params)
         else:
-            print "No hyper parameter changed detected, using old checkpoint..."
+            print("No hyper parameter changed detected, using old checkpoint...")
     else:
         serializer.saveParams(hyper_params)
-        print "No hyper params detected at checkpoint... reading config file"
+        print("No hyper params detected at checkpoint... reading config file")
     return hyper_params
 
 
@@ -184,7 +186,7 @@ def readConfigFile():
     '''
     Reads in config file, returns dictionary of network params
     '''
-    config = ConfigParser.ConfigParser()
+    config = configparser.ConfigParser()
     config.read(FLAGS.config_file)
     dic = {}
     acoustic_section = "acoustic_network_params"

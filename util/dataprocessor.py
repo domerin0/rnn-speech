@@ -24,19 +24,19 @@ class DataProcessor(object):
         # Check if processor needs to be run
         if os.path.exists(os.path.join(self.train_dir, "master_text_file.txt"))\
             and os.path.exists(os.path.join(self.test_dir, "master_text_file.txt")):
-            print "No need to run data processor..."
+            print("No need to run data processor...")
             return
 
         # Next check which data folders are present
         self.data_dirs = self.checkWhichDataFoldersArePresent()
         if len(self.data_dirs) == 0:
-            print "Something went wrong, no data detected, check data directory.."
+            print("Something went wrong, no data detected, check data directory..")
             return
 
         # Get pairs of (audio_file_name, transcribed_text)
-        print "Figuring out which files need to be processed..."
+        print("Figuring out which files need to be processed...")
         audio_file_text_pairs, will_convert = self.getFileNameTextPairs()
-        print "Using {0} files in total dataset...".format(len(audio_file_text_pairs))
+        print("Using {0} files in total dataset...".format(len(audio_file_text_pairs)))
         # Shuffle pairs
         shuffle(audio_file_text_pairs)
 

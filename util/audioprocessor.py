@@ -23,15 +23,15 @@ class AudioProcessor(object):
             for file_name in file_name_text_pairs[0]:
                 counter += 1
                 if counter % 100 == 0:
-                    print "Processing file {0}... on thread {1}".format(counter,
-                        thread_num)
+                    print("Processing file {0}... on thread {1}".format(counter,
+                                                                        thread_num))
                 # TODO : check following code because self.max_target_seq_length does not exist...
                 if len(file_name[1]) > self.max_target_seq_length:
                     continue
                 wav_file = self.convertFlac2Wav(file_name[0])
                 feat_vec = self.computeLogMelFilterBank(wav_file)
                 if len(feat_vec) > self.max_input_seq_length:
-                    print "skipping"
+                    print("skipping")
                     continue
                 elif len(feat_vec) < self.max_input_seq_length:
                     pad_length = self.max_input_seq_length - len(feat_vec)
