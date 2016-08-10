@@ -135,28 +135,33 @@ class AcousticModel(object):
 
         batch_counter = 0
         for file_text in to_process:
-            feat_vec, feat_vec_length = self.audio_processor.processFLACAudio(file_text[0])
+            # Process the audio file to get the input
+            feat_vec, original_feat_vec_length = self.audio_processor.processFLACAudio(file_text[0])
+            # Process the label to get the output
             labels = self.getStrLabels(file_text[1])
 
-            if len(feat_vec) > self.max_input_seq_length:
-                feat_vec = feat_vec[:self.max_input_seq_length]
-                feat_vec_length = self.max_input_seq_length
-            input_feat_vecs.append(feat_vec)
-            assert feat_vec_length <= self.max_input_seq_length, "{0} not less than {1}".format(feat_vec_length,
-                                                                                                self.max_input_seq_length)
-            input_feat_vec_lengths.append(feat_vec_length)
-            # compute sparse tensor inputs
+            # Check max output size
             if len(labels) > self.max_target_seq_length:
+                # Cut if too long
                 labels = labels[:self.max_target_seq_length]
+                # But if we didn't cut the audio file then we have a problem and we should not use this sample
+                if original_feat_vec_length <= self.max_input_seq_length:
+                    continue
+            # Labels len does not need to be always the same as for input, don't need padding
+
+            assert len(labels) <= self.max_target_seq_length
+            assert len(feat_vec) <= self.max_input_seq_length
+
+            # Add input to inputs matrix and unpadded or cut size to dedicated vector
+            input_feat_vecs.append(feat_vec)
+            input_feat_vec_lengths.append(min(original_feat_vec_length, self.max_input_seq_length))
+
+            # Compute sparse tensor for labels
             indices = [[batch_counter, i] for i in range(len(labels))]
             target_indices += indices
             target_labels += labels
             target_lengths.append(len(labels))
             batch_counter += 1
-            # assert len(target_indices) <= self.max_target_seq_length, "target_indices is not less than {0}".format(len(target_indices))
-            # assert len(target_labels) <= self.max_target_seq_length, "target_labels is not less than {0}".format(len(target_labels))
-            assert len(labels) <= self.max_target_seq_length
-            assert len(feat_vec) <= self.max_input_seq_length
 
         remaining = len(dataset) - (already_processed + num_data_points)
         if remaining == 0:
