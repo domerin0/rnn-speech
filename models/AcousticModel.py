@@ -36,8 +36,7 @@ class AcousticModel(object):
         self.dropout = dropout
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
-        self.learning_rate_decay_op = self.learning_rate.assign(
-            self.learning_rate * lr_decay_factor)
+        self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * lr_decay_factor)
         self.global_step = tf.Variable(0, trainable=False)
         self.dropout_keep_prob_lstm_input = tf.constant(self.dropout)
         self.dropout_keep_prob_lstm_output = tf.constant(self.dropout)
@@ -75,8 +74,7 @@ class AcousticModel(object):
         b_i = tf.get_variable("input_b", [hidden_size])
 
         # make rnn inputs
-        inputs = [tf.nn.xw_plus_b(tf.squeeze(i),
-                                  w_i, b_i) for i in tf.split(0, self.max_input_seq_length, self.inputs)]
+        inputs = [tf.matmul(tf.squeeze(i), w_i) + b_i for i in tf.split(0, self.max_input_seq_length, self.inputs)]
 
         # set rnn init state to 0s
         initial_state = cell.zero_state(self.batch_size, tf.float32)
@@ -92,8 +90,7 @@ class AcousticModel(object):
         b_o = tf.get_variable("output_b", [num_labels])
 
         # compute logits
-        self.logits = [tf.nn.xw_plus_b(tf.squeeze(i),
-                                       w_o, b_o) for i in tf.split(0, self.max_input_seq_length, rnn_output)]
+        self.logits = [tf.matmul(tf.squeeze(i), w_o) + b_o for i in tf.split(0, self.max_input_seq_length, rnn_output)]
         # setup sparse tensor for input into ctc loss
         sparse_labels = tf.SparseTensor(
             indices=self.target_indices,
@@ -196,7 +193,7 @@ class AcousticModel(object):
         return [allowed_chars.index(char) for char in _str]
 
     def getNumBatches(self, dataset):
-        return len(dataset) / self.batch_size
+        return len(dataset) // self.batch_size
 
     def step(self, session, inputs, input_seq_lengths, target_seq_lengths,
              target_vals, target_indices, forward_only=False):
