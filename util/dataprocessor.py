@@ -12,23 +12,12 @@ import util.audioprocessor as audioprocessor
 
 
 class DataProcessor(object):
-    def __init__(self, data_path, raw_data_path, config_dic):
-        self.data_path = data_path
+    def __init__(self, raw_data_path):
         self.raw_data_path = raw_data_path
-        self.config_dic = config_dic
+        self.data_dirs = self.checkWhichDataFoldersArePresent()
 
     def run(self):
-        # First make output directories
-        self.setupProcessedDataDirs()
-
-        # Check if processor needs to be run
-        if os.path.exists(os.path.join(self.train_dir, "master_text_file.txt"))\
-            and os.path.exists(os.path.join(self.test_dir, "master_text_file.txt")):
-            print("No need to run data processor...")
-            return
-
-        # Next check which data folders are present
-        self.data_dirs = self.checkWhichDataFoldersArePresent()
+        # Check which data folders are present
         if len(self.data_dirs) == 0:
             print("Something went wrong, no data detected, check data directory..")
             return
@@ -46,23 +35,14 @@ class DataProcessor(object):
             for audio_file_name in audio_file_text_pairs:
                 if audio_file_name[0].endswith(".flac"):
                     audio_processor.convertAndDeleteFLAC(audio_file_name[0])
-                    audio_file_text_pairs_final.append((audio_file_name[0].replace(".flac", ".wav"), audio_file_name[1]))
+                    audio_file_text_pairs_final.append((audio_file_name[0].replace(".flac", ".wav"),
+                                                        audio_file_name[1]))
                 else:
                     audio_file_text_pairs_final.append((audio_file_name[0], audio_file_name[1]))
         else:
             audio_file_text_pairs_final = audio_file_text_pairs
 
         return audio_file_text_pairs_final
-
-    def readInMetaInformation(self):
-        file_info = []
-        with open(os.path.join(self.raw_data_path,
-            "CHAPTERS.txt")) as data_file:
-            for line in data_file:
-                info = line.split("|")
-                if info[3].replace(" ", "") in self.data_dirs:
-                    file_info.append(info)
-        return file_info
 
     def getFileNameTextPairs(self):
         '''
@@ -76,10 +56,12 @@ class DataProcessor(object):
         for d in self.data_dirs:
             root_search_path = os.path.join(self.raw_data_path, d)
             for root, subdirs, files in os.walk(root_search_path):
-                flac_audio_files = [os.path.join(root, audio_file) for audio_file in files if audio_file.endswith(".flac")]
-                wav_audio_files = [os.path.join(root, audio_file) for audio_file in files if audio_file.endswith(".wav")]
+                flac_audio_files = [os.path.join(root, audio_file)
+                                    for audio_file in files if audio_file.endswith(".flac")]
+                wav_audio_files = [os.path.join(root, audio_file)
+                                   for audio_file in files if audio_file.endswith(".wav")]
                 text_files = [os.path.join(root, text_file) for
-                    text_file in files if text_file.endswith(".txt")]
+                              text_file in files if text_file.endswith(".txt")]
                 if len(flac_audio_files) > 0:
                     # We have at least one file to convert
                     will_convert = True
@@ -99,18 +81,10 @@ class DataProcessor(object):
                                     break
         return audio_file_text_pairs, will_convert
 
-    def setupProcessedDataDirs(self):
-        self.train_dir = os.path.join(self.data_path, "train/")
-        self.test_dir = os.path.join(self.data_path, "test/")
-        if not os.path.exists(self.train_dir):
-            os.makedirs(self.train_dir)
-        if not os.path.exists(self.test_dir):
-            os.makedirs(self.test_dir)
-
     def checkWhichDataFoldersArePresent(self):
         dirs_to_check = ["dev-clean", "train-other-500", "train-other-100",
-        "train-clean-100", "train-clean-360", "test-clean",
-        "test-other", "dev-other"]
+                         "train-clean-100", "train-clean-360", "test-clean",
+                         "test-other", "dev-other"]
         dirs_available = [name for name in os.listdir(self.raw_data_path)]
         dirs_allowed = []
         for d in dirs_available:
