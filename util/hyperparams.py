@@ -5,6 +5,7 @@ of hyperparameters (for use in checkpoint restoration and sampling)
 import os
 import pickle
 
+
 class HyperParameterHandler(object):
     def __init__(self, path):
         self.file_path = os.path.join(path, "hyperparams.p")

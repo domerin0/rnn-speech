@@ -38,7 +38,7 @@ class AudioProcessor(object):
         return feat_vec, original_feat_vec_length
 
     def convertAndDeleteFLAC(self, audio_file_name):
-        wav_file = self.convertFlac2Wav(audio_file_name)
+        self.convertFlac2Wav(audio_file_name)
         self.deleteWav(audio_file_name)
 
     def computeLogMelFilterBank(self, file_name):
@@ -47,7 +47,7 @@ class AudioProcessor(object):
         double deltas
         '''
         (rate, sig) = wav.read(file_name)
-        fbank_feat, energy = fbank(sig,rate, winlen=0.025,winstep=0.01, nfilt=40)
+        fbank_feat, energy = fbank(sig, rate, winlen=0.025, winstep=0.01, nfilt=40)
         fbank_feat = np.log(fbank_feat)
         fbank_feat = np.vstack((fbank_feat.transpose(), energy.transpose())).transpose()
         deltas = self.computeDeltas(fbank_feat)
@@ -69,7 +69,7 @@ class AudioProcessor(object):
             deltas = []
             # If there are not enough side frames, we put
             # 0s in for the deltas
-            if (i - N < 0 or i + N > (len(fbank_frames) - 1)):
+            if i - N < 0 or i + N > (len(fbank_frames) - 1):
                 frames.append([0] * len(feat_vec))
             else:
                 for ii in range(len(feat_vec)):
@@ -87,7 +87,7 @@ class AudioProcessor(object):
         Convert the flac file to wav (so we can process on it)
         '''
         os.system("sox {0} {1}".format(file_name,
-            file_name.replace(".flac", ".wav")))
+                  file_name.replace(".flac", ".wav")))
         return file_name.replace(".flac", ".wav")
 
     def deleteWav(self, file_name):
