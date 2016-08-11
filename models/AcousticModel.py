@@ -31,8 +31,10 @@ class AcousticModel(object):
         dropout - probability of dropping hidden weights
         batch_size - number of training examples fed at once
         learning_rate - learning rate parameter fed to optimizer
+        lr_decay_factor - decay factor of the learning rate
         grad_clip - max gradient size (prevent exploding gradients)
-        max_seq_length - maximum length of input vector sequence
+        max_input_seq_length - maximum length of input vector sequence
+        max_target_seq_length - maximum length of ouput vector sequence
         input_dim - dimension of input vector
         forward_only - whether to build back prop nodes or not
         '''
@@ -119,9 +121,11 @@ class AcousticModel(object):
     def getBatch(self, dataset, batch_pointer, is_train):
         '''
         Inputs:
-        dataset - tuples of (numpy file, transcribed_text)
+          dataset - tuples of (wav file, transcribed_text)
+          batch_pointer - start point in dataset from where to take the batch
+          is_train - training mode (to choose which pipe to use)
         Returns:
-        input_feat_vecs, input_feat_vec_lengths, target_lengths,
+          input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
         '''
         already_processed = self.batch_size * batch_pointer
