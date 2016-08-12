@@ -9,8 +9,10 @@ acoustic RNN trained with ctc loss
 '''
 
 import tensorflow as tf
-from tensorflow.models.rnn import rnn_cell, rnn
-import tensorflow.contrib.ctc as ctc
+try:
+    from tensorflow.models.rnn import rnn_cell, rnn
+except:
+    from tensorflow.python.ops import rnn_cell, rnn import tensorflow.contrib.ctc as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
 
