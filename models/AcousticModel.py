@@ -10,7 +10,7 @@ acoustic RNN trained with ctc loss
 
 
 import tensorflow as tf
-from tensorflow.models.rnn import seq2seq, rnn_cell, rnn
+from tensorflow.python.ops import rnn_cell, rnn
 import tensorflow.contrib.ctc as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
@@ -106,7 +106,7 @@ class AcousticModel(object):
         params = tf.trainable_variables()
 
         if not forward_only:
-            opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+            opt = tf.train.AdamOptimizer(self.learning_rate)
             gradients = tf.gradients(self.ctc_loss, params)
             clipped_gradients, norm = tf.clip_by_global_norm(gradients,
             grad_clip)
