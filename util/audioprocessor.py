@@ -6,12 +6,11 @@ values
 The feature vectors
 are extracted every 10 ms with 25 ms Hamming window
 '''
-from features import mfcc
-from features import logfbank
-from features import fbank
+from python_speech_features import fbank
 import scipy.io.wavfile as wav
 import numpy as np
 import os
+
 
 class AudioProcessor(object):
     def __init__(self, max_input_seq_length):
@@ -24,14 +23,15 @@ class AudioProcessor(object):
             for file_name in file_name_text_pairs[0]:
                 counter += 1
                 if counter % 100 == 0:
-                    print "Processing file {0}... on thread {1}".format(counter,
-                        thread_num)
+                    print("Processing file {0}... on thread {1}".format(counter,
+                                                                        thread_num))
+                # TODO : check following code because self.max_target_seq_length does not exist...
                 if len(file_name[1]) > self.max_target_seq_length:
                     continue
                 wav_file = self.convertFlac2Wav(file_name[0])
                 feat_vec = self.computeLogMelFilterBank(wav_file)
                 if len(feat_vec) > self.max_input_seq_length:
-                    print "skipping"
+                    print("skipping")
                     continue
                 elif len(feat_vec) < self.max_input_seq_length:
                     pad_length = self.max_input_seq_length - len(feat_vec)
@@ -39,7 +39,7 @@ class AudioProcessor(object):
                     feat_vec = np.concatenate((feat_vec, padding), 0)
                     assert len(feat_vec) == self.max_input_seq_length, "Padding incorrect..."
                 self.deleteWav(wav_file)
-                #save feature vector
+                # save feature vector
                 array_file_name = os.path.basename(file_name[0]).replace(".flac", ".npy")
                 np.save(os.path.join(output_dir, array_file_name), feat_vec)
                 f.write("{0}, {1}\n".format(array_file_name,
