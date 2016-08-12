@@ -12,7 +12,8 @@ import tensorflow as tf
 try:
     from tensorflow.models.rnn import rnn_cell, rnn
 except:
-    from tensorflow.python.ops import rnn_cell, rnn import tensorflow.contrib.ctc as ctc
+    from tensorflow.python.ops import rnn_cell, rnn
+import tensorflow.contrib.ctc as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
 
@@ -71,7 +72,8 @@ class AcousticModel(object):
         b_i = tf.get_variable("input_b", [hidden_size])
 
         # make rnn inputs
-        inputs = [tf.matmul(tf.squeeze(i), w_i) + b_i for i in tf.split(0, self.max_input_seq_length, self.inputs)]
+        inputs = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_i) + b_i
+                  for i in tf.split(0, self.max_input_seq_length, self.inputs)]
 
         # set rnn init state to 0s
         initial_state = cell.zero_state(self.batch_size, tf.float32)
@@ -87,7 +89,8 @@ class AcousticModel(object):
         b_o = tf.get_variable("output_b", [num_labels])
 
         # compute logits
-        self.logits = [tf.matmul(tf.squeeze(i), w_o) + b_o for i in tf.split(0, self.max_input_seq_length, rnn_output)]
+        self.logits = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
+                       for i in tf.split(0, self.max_input_seq_length, rnn_output)]
 
         if forward_only:
             self.logits = tf.pack(self.logits)
