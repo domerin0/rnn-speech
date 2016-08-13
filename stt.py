@@ -27,9 +27,6 @@ def main():
         print("File too long")
         return
 
-    print("Using checkpoint {0}".format(hyper_params["checkpoint_dir"]))
-    print("Using hyper params: {0}".format(hyper_params))
-
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")

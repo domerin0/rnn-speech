@@ -16,7 +16,10 @@ except:
 import tensorflow.contrib.ctc as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
-
+from multiprocessing import Process, Pipe
+import time
+import sys
+import os
 
 class AcousticModel(object):
     def __init__(self, num_labels, num_layers, hidden_size, dropout,
@@ -47,6 +50,11 @@ class AcousticModel(object):
         self.dropout_keep_prob_lstm_output = tf.constant(self.dropout)
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
+
+        # Initialize data pipes to None
+        self.train_conn = None
+        self.test_conn = None
+
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
                                      shape=[self.max_input_seq_length, None, input_dim],
@@ -192,9 +200,12 @@ class AcousticModel(object):
     def initializeAudioProcessor(self, max_input_seq_length):
         self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
 
-    def setConnections(self, test_conn, train_conn):
-        self.train_conn = train_conn
-        self.test_conn = test_conn
+    def setConnections(self):
+        # setting up piplines to be able to load data async (one for test set, one for train)
+        # TODO tensorflow probably has something built in for this, look into it
+        parent_train_conn, self.train_conn = Pipe()
+        parent_test_conn, self.test_conn = Pipe()
+        return parent_train_conn, parent_test_conn
 
     def getCharLabel(self, char):
         '''
@@ -236,7 +247,6 @@ class AcousticModel(object):
         else:
             return outputs[0], outputs[1]
 
-
     def process_input(self, session, inputs, input_seq_lengths):
         '''
         Returns:
@@ -248,3 +258,79 @@ class AcousticModel(object):
         output_feed = [self.logits]
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
+
+    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir):
+        print("Setting up piplines to test and train data...")
+        parent_train_conn, parent_test_conn = self.setConnections()
+
+        num_test_batches = self.getNumBatches(test_set)
+        num_train_batches = self.getNumBatches(train_set)
+
+        train_batch_pointer = 0
+        test_batch_pointer = 0
+
+        async_train_loader = Process(
+            target=self.getBatch,
+            args=(train_set, train_batch_pointer, True))
+        async_train_loader.start()
+
+        step_time, loss = 0.0, 0.0
+        current_step = 0
+        previous_losses = []
+        while True:
+            # begin timer
+            start_time = time.time()
+            # receive batch from pipe
+            step_batch_inputs = parent_train_conn.recv()
+
+            train_batch_pointer = step_batch_inputs[5] % num_train_batches
+
+            # begin fetching other batch while graph processes previous one
+            async_train_loader = Process(
+                target=self.getBatch,
+                args=(train_set, train_batch_pointer, True))
+            async_train_loader.start()
+
+            _, step_loss = self.step(sess, step_batch_inputs[0], step_batch_inputs[1],
+                                      step_batch_inputs[2], step_batch_inputs[3],
+                                      step_batch_inputs[4], forward_only=False)
+
+            print("Step {0} with loss {1}".format(current_step, step_loss))
+            step_time += (time.time() - start_time) / steps_per_checkpoint
+            loss += step_loss / steps_per_checkpoint
+            current_step += 1
+            if current_step % steps_per_checkpoint == 0:
+                print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
+                      (self.global_step.eval(), self.learning_rate.eval(), step_time, loss))
+                # Decrease learning rate if no improvement was seen over last 3 times.
+                if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
+                    sess.run(self.learning_rate_decay_op)
+                previous_losses.append(loss)
+
+                checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
+                self.saver.save(sess, checkpoint_path, global_step=self.global_step)
+                step_time, loss = 0.0, 0.0
+                # begin loading test data async
+                # (uses different pipline than train data)
+                async_test_loader = Process(
+                    target=self.getBatch,
+                    args=(test_set, test_batch_pointer, False))
+                async_test_loader.start()
+                print(num_test_batches)
+                for i in range(num_test_batches):
+                    print("On {0}th training iteration".format(i))
+                    eval_inputs = parent_test_conn.recv()
+                    # async_test_loader.join()
+                    test_batch_pointer = eval_inputs[5] % num_test_batches
+                    # tell audio processor to go get another batch ready
+                    # while we run last one through the graph
+                    if i != num_test_batches - 1:
+                        async_test_loader = Process(
+                            target=self.getBatch,
+                            args=(test_set, test_batch_pointer, False))
+                        async_test_loader.start()
+                    _, loss = self.step(sess, eval_inputs[0], eval_inputs[1],
+                                         eval_inputs[2], eval_inputs[3],
+                                         eval_inputs[4], forward_only=True)
+                print("\tTest: loss %.2f" % loss)
+                sys.stdout.flush()
