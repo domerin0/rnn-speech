@@ -26,9 +26,9 @@ flags.DEFINE_string("config_file", "config.ini", "Path to configuration file wit
 
 
 def main():
-    hyper_params = checkGetHyperParamDic()
-    print("Using checkpoint {0}".format(hyper_params["checkpoint_dir"]))
-    print("Using hyper params: {0}".format(hyper_params))
+    serializer = hyperparams.HyperParameterHandler(FLAGS.config_file)
+    hyper_params = serializer.getHyperParams()
+
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"])
     text_audio_pairs = data_processor.run()
     num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
@@ -142,67 +142,6 @@ def createAcousticModel(session, hyper_params):
         print("Created model with fresh parameters.")
         session.run(tf.initialize_all_variables())
     return model
-
-
-def checkGetHyperParamDic():
-    '''
-    Retrieves hyper parameter information from either config file or checkpoint
-    '''
-    hyper_params = readConfigFile()
-    if not os.path.exists(hyper_params["checkpoint_dir"]):
-        os.makedirs(hyper_params["checkpoint_dir"])
-    serializer = hyperparams.HyperParameterHandler(hyper_params["checkpoint_dir"])
-    if serializer.checkExists():
-        if serializer.checkChanged(hyper_params):
-            if not hyper_params["use_config_file_if_checkpoint_exists"]:
-                hyper_params = serializer.getParams()
-                print("Restoring hyper params from previous checkpoint...")
-            else:
-                new_checkpoint_dir = "{0}_hidden_size_{1}_numlayers_{2}_dropout_{3}".format(
-                    int(time.time()),
-                    hyper_params["hidden_size"],
-                    hyper_params["num_layers"],
-                    hyper_params["dropout"])
-                new_checkpoint_dir = os.path.join(hyper_params["checkpoint_dir"],
-                                                  new_checkpoint_dir)
-                os.makedirs(new_checkpoint_dir)
-                hyper_params["checkpoint_dir"] = new_checkpoint_dir
-                serializer = hyperparams.HyperParameterHandler(hyper_params["checkpoint_dir"])
-                serializer.saveParams(hyper_params)
-        else:
-            print("No hyper parameter changed detected, using old checkpoint...")
-    else:
-        serializer.saveParams(hyper_params)
-        print("No hyper params detected at checkpoint... reading config file")
-    return hyper_params
-
-
-def readConfigFile():
-    '''
-    Reads in config file, returns dictionary of network params
-    '''
-    config = configparser.ConfigParser()
-    config.read(FLAGS.config_file)
-    dic = {}
-    acoustic_section = "acoustic_network_params"
-    general_section = "general"
-    training_section = "training"
-    dic["num_layers"] = config.getint(acoustic_section, "num_layers")
-    dic["hidden_size"] = config.getint(acoustic_section, "hidden_size")
-    dic["dropout"] = config.getfloat(acoustic_section, "dropout")
-    dic["batch_size"] = config.getint(acoustic_section, "batch_size")
-    dic["train_frac"] = config.getfloat(acoustic_section, "train_frac")
-    dic["learning_rate"] = config.getfloat(acoustic_section, "learning_rate")
-    dic["lr_decay_factor"] = config.getfloat(acoustic_section, "lr_decay_factor")
-    dic["grad_clip"] = config.getint(acoustic_section, "grad_clip")
-    dic["use_config_file_if_checkpoint_exists"] = config.getboolean(general_section,
-                                                                    "use_config_file_if_checkpoint_exists")
-    dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
-    dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
-    dic["training_dataset_dir"] = config.get(training_section, "training_dataset_dir")
-    dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
-    dic["max_target_seq_length"] = config.getint(training_section, "max_target_seq_length")
-    return dic
 
 
 if __name__ == "__main__":
