@@ -31,8 +31,10 @@ class AcousticModel(object):
         dropout - probability of dropping hidden weights
         batch_size - number of training examples fed at once
         learning_rate - learning rate parameter fed to optimizer
+        lr_decay_factor - decay factor of the learning rate
         grad_clip - max gradient size (prevent exploding gradients)
-        max_seq_length - maximum length of input vector sequence
+        max_input_seq_length - maximum length of input vector sequence
+        max_target_seq_length - maximum length of ouput vector sequence
         input_dim - dimension of input vector
         forward_only - whether to build back prop nodes or not
         '''
@@ -55,13 +57,6 @@ class AcousticModel(object):
         self.target_seq_lengths = tf.placeholder(tf.int32,
                                                  shape=[None],
                                                  name="target_seq_lengths")
-        # graph sparse tensor inputs
-        self.target_indices = tf.placeholder(tf.int64,
-                                             shape=[None, 2],
-                                             name="target_indices")
-        self.target_vals = tf.placeholder(tf.int32,
-                                          shape=[None],
-                                          name="target_vals")
 
         # define cells of acoustic model
         cell = rnn_cell.DropoutWrapper(
@@ -77,7 +72,8 @@ class AcousticModel(object):
         b_i = tf.get_variable("input_b", [hidden_size])
 
         # make rnn inputs
-        inputs = [tf.matmul(tf.squeeze(i), w_i) + b_i for i in tf.split(0, self.max_input_seq_length, self.inputs)]
+        inputs = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_i) + b_i
+                  for i in tf.split(0, self.max_input_seq_length, self.inputs)]
 
         # set rnn init state to 0s
         initial_state = cell.zero_state(self.batch_size, tf.float32)
@@ -93,20 +89,32 @@ class AcousticModel(object):
         b_o = tf.get_variable("output_b", [num_labels])
 
         # compute logits
-        self.logits = [tf.matmul(tf.squeeze(i), w_o) + b_o for i in tf.split(0, self.max_input_seq_length, rnn_output)]
-        # setup sparse tensor for input into ctc loss
-        sparse_labels = tf.SparseTensor(
-            indices=self.target_indices,
-            values=self.target_vals,
-            shape=[self.batch_size, self.max_target_seq_length])
+        self.logits = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
+                       for i in tf.split(0, self.max_input_seq_length, rnn_output)]
 
-        # compute ctc loss
-        self.ctc_loss = ctc.ctc_loss(tf.pack(self.logits), sparse_labels,
-                                     self.input_seq_lengths)
-        self.mean_loss = tf.reduce_mean(self.ctc_loss)
-        params = tf.trainable_variables()
+        if forward_only:
+            self.logits = tf.pack(self.logits)
+        else:
+            # graph sparse tensor inputs
+            self.target_indices = tf.placeholder(tf.int64,
+                                                 shape=[None, 2],
+                                                 name="target_indices")
+            self.target_vals = tf.placeholder(tf.int32,
+                                              shape=[None],
+                                              name="target_vals")
 
-        if not forward_only:
+            # setup sparse tensor for input into ctc loss
+            sparse_labels = tf.SparseTensor(
+                indices=self.target_indices,
+                values=self.target_vals,
+                shape=[self.batch_size, self.max_target_seq_length])
+
+            # compute ctc loss
+            self.ctc_loss = ctc.ctc_loss(tf.pack(self.logits), sparse_labels,
+                                         self.input_seq_lengths)
+            self.mean_loss = tf.reduce_mean(self.ctc_loss)
+            params = tf.trainable_variables()
+
             opt = tf.train.GradientDescentOptimizer(self.learning_rate)
             gradients = tf.gradients(self.ctc_loss, params)
             clipped_gradients, norm = tf.clip_by_global_norm(gradients,
@@ -119,9 +127,11 @@ class AcousticModel(object):
     def getBatch(self, dataset, batch_pointer, is_train):
         '''
         Inputs:
-        dataset - tuples of (numpy file, transcribed_text)
+          dataset - tuples of (wav file, transcribed_text)
+          batch_pointer - start point in dataset from where to take the batch
+          is_train - training mode (to choose which pipe to use)
         Returns:
-        input_feat_vecs, input_feat_vec_lengths, target_lengths,
+          input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
         '''
         already_processed = self.batch_size * batch_pointer
@@ -225,3 +235,16 @@ class AcousticModel(object):
             return outputs[0], outputs[2]
         else:
             return outputs[0], outputs[1]
+
+
+    def process_input(self, session, inputs, input_seq_lengths):
+        '''
+        Returns:
+          Translated text
+        '''
+        input_feed = {}
+        input_feed[self.inputs.name] = np.array(inputs)
+        input_feed[self.input_seq_lengths.name] = np.array(input_seq_lengths)
+        output_feed = [self.logits]
+        outputs = session.run(output_feed, input_feed)
+        return outputs[0]

@@ -6,7 +6,8 @@ http://arxiv.org/pdf/1601.06581v2.pdf
 '''
 
 from tensorflow.python.platform import gfile
-from models.AcousticModel import *
+from models.AcousticModel import AcousticModel
+import tensorflow as tf
 import sys
 import os
 import time
@@ -22,18 +23,13 @@ from math import floor
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_string("config_file", "config.ini", "Path to configuration file with hyper-parameters.")
-# TODO consider consolidating into config file
-flags.DEFINE_string("checkpoint_dir", "data/checkpoints/", "Directory to store/restore checkpoints")
-flags.DEFINE_string("data_dir", "data/", "Path to main data directory.")
-flags.DEFINE_string("raw_data_dir", "data/LibriSpeech/", "Path to unprocessed data dir.")
 
 
 def main():
     hyper_params = checkGetHyperParamDic()
-    print("Using checkpoint {0}".format(FLAGS.checkpoint_dir))
+    print("Using checkpoint {0}".format(hyper_params["checkpoint_dir"]))
     print("Using hyper params: {0}".format(hyper_params))
-    data_processor = dataprocessor.DataProcessor(FLAGS.data_dir,
-                                                 FLAGS.raw_data_dir, hyper_params)
+    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"])
     text_audio_pairs = data_processor.run()
     num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
     train_set = text_audio_pairs[:num_train]
@@ -91,15 +87,14 @@ def main():
             loss += step_loss / hyper_params["steps_per_checkpoint"]
             current_step += 1
             if current_step % hyper_params["steps_per_checkpoint"] == 0:
-                print("global step %d learning rate %.4f step-time %.2f loss "
-                       "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
-                                 step_time, loss))
+                print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
+                      (model.global_step.eval(), model.learning_rate.eval(), step_time, loss))
                 # Decrease learning rate if no improvement was seen over last 3 times.
                 if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
                     sess.run(model.learning_rate_decay_op)
                 previous_losses.append(loss)
 
-                checkpoint_path = os.path.join(FLAGS.checkpoint_dir, "acousticmodel.ckpt")
+                checkpoint_path = os.path.join(hyper_params["checkpoint_dir"], "acousticmodel.ckpt")
                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
                 step_time, loss = 0.0, 0.0
                 # begin loading test data async
@@ -124,7 +119,7 @@ def main():
                     _, loss = model.step(sess, eval_inputs[0], eval_inputs[1],
                                          eval_inputs[2], eval_inputs[3],
                                          eval_inputs[4], forward_only=True)
-                print("\tTest: loss %.2f" % (loss))
+                print("\tTest: loss %.2f" % loss)
                 sys.stdout.flush()
 
 
@@ -139,7 +134,7 @@ def createAcousticModel(session, hyper_params):
                           hyper_params["max_target_seq_length"],
                           input_dim,
                           forward_only=False)
-    ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)
+    ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
         print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
         model.saver.restore(session, ckpt.model_checkpoint_path)
@@ -153,10 +148,10 @@ def checkGetHyperParamDic():
     '''
     Retrieves hyper parameter information from either config file or checkpoint
     '''
-    if not os.path.exists(FLAGS.checkpoint_dir):
-        os.makedirs(FLAGS.checkpoint_dir)
-    serializer = hyperparams.HyperParameterHandler(FLAGS.checkpoint_dir)
     hyper_params = readConfigFile()
+    if not os.path.exists(hyper_params["checkpoint_dir"]):
+        os.makedirs(hyper_params["checkpoint_dir"])
+    serializer = hyperparams.HyperParameterHandler(hyper_params["checkpoint_dir"])
     if serializer.checkExists():
         if serializer.checkChanged(hyper_params):
             if not hyper_params["use_config_file_if_checkpoint_exists"]:
@@ -168,11 +163,11 @@ def checkGetHyperParamDic():
                     hyper_params["hidden_size"],
                     hyper_params["num_layers"],
                     hyper_params["dropout"])
-                new_checkpoint_dir = os.path.join(FLAGS.checkpoint_dir,
+                new_checkpoint_dir = os.path.join(hyper_params["checkpoint_dir"],
                                                   new_checkpoint_dir)
                 os.makedirs(new_checkpoint_dir)
-                FLAGS.checkpoint_dir = new_checkpoint_dir
-                serializer = hyperparams.HyperParameterHandler(FLAGS.checkpoint_dir)
+                hyper_params["checkpoint_dir"] = new_checkpoint_dir
+                serializer = hyperparams.HyperParameterHandler(hyper_params["checkpoint_dir"])
                 serializer.saveParams(hyper_params)
         else:
             print("No hyper parameter changed detected, using old checkpoint...")
@@ -191,6 +186,7 @@ def readConfigFile():
     dic = {}
     acoustic_section = "acoustic_network_params"
     general_section = "general"
+    training_section = "training"
     dic["num_layers"] = config.getint(acoustic_section, "num_layers")
     dic["hidden_size"] = config.getint(acoustic_section, "hidden_size")
     dic["dropout"] = config.getfloat(acoustic_section, "dropout")
@@ -201,12 +197,11 @@ def readConfigFile():
     dic["grad_clip"] = config.getint(acoustic_section, "grad_clip")
     dic["use_config_file_if_checkpoint_exists"] = config.getboolean(general_section,
                                                                     "use_config_file_if_checkpoint_exists")
-    dic["max_input_seq_length"] = config.getint(general_section,
-                                                "max_input_seq_length")
-    dic["max_target_seq_length"] = config.getint(general_section,
-                                                 "max_target_seq_length")
-    dic["steps_per_checkpoint"] = config.getint(general_section,
-                                                "steps_per_checkpoint")
+    dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
+    dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
+    dic["training_dataset_dir"] = config.get(training_section, "training_dataset_dir")
+    dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
+    dic["max_target_seq_length"] = config.getint(training_section, "max_target_seq_length")
     return dic
 
 
