@@ -59,10 +59,13 @@ class AcousticModel(object):
         self.inputs = tf.placeholder(tf.float32,
                                      shape=[self.max_input_seq_length, None, input_dim],
                                      name="inputs")
+        # We could take an int16 for less memory consumption but CTC need an int32
         self.input_seq_lengths = tf.placeholder(tf.int32,
                                                 shape=[None],
                                                 name="input_seq_lengths")
-        self.target_seq_lengths = tf.placeholder(tf.int32,
+        # Take an int16 for less memory consumption
+        # max_target_seq_length should be less than 65535 (which is huge)
+        self.target_seq_lengths = tf.placeholder(tf.int16,
                                                  shape=[None],
                                                  name="target_seq_lengths")
 
@@ -104,9 +107,11 @@ class AcousticModel(object):
             self.logits = tf.pack(self.logits)
         else:
             # graph sparse tensor inputs
+            # We could take an int16 for less memory consumption but SparseTensor need an int64
             self.target_indices = tf.placeholder(tf.int64,
                                                  shape=[None, 2],
                                                  name="target_indices")
+            # We could take an int8 for less memory consumption but CTC need an int32
             self.target_vals = tf.placeholder(tf.int32,
                                               shape=[None],
                                               name="target_vals")
@@ -142,9 +147,7 @@ class AcousticModel(object):
           input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
         '''
-        already_processed = self.batch_size * batch_pointer
-        num_data_points = min(self.batch_size, len(dataset[already_processed:]))
-        to_process = dataset[already_processed:already_processed + num_data_points]
+        initial_batch_pointer = batch_pointer
         input_feat_vecs = []
         input_feat_vec_lengths = []
         target_lengths = []
@@ -152,20 +155,25 @@ class AcousticModel(object):
         target_indices = []
 
         batch_counter = 0
-        for file_text in to_process:
+        while batch_counter < self.batch_size:
+            file_text = dataset[batch_pointer]
+            batch_pointer += 1
+            if batch_pointer == dataset.__len__():
+                batch_pointer = 0
+            assert batch_pointer != initial_batch_pointer
+
             # Process the audio file to get the input
             feat_vec, original_feat_vec_length = self.audio_processor.processFLACAudio(file_text[0])
             # Process the label to get the output
             labels = self.getStrLabels(file_text[1])
-
-            # Check max output size
-            if len(labels) > self.max_target_seq_length:
-                # Cut if too long
-                labels = labels[:self.max_target_seq_length]
-                # But if we didn't cut the audio file then we have a problem and we should not use this sample
-                if original_feat_vec_length <= self.max_input_seq_length:
-                    continue
             # Labels len does not need to be always the same as for input, don't need padding
+
+            # Check sizes
+            if (len(labels) > self.max_target_seq_length) or (original_feat_vec_length > self.max_input_seq_length):
+                # If either input or output vector is too long we shouldn't take this sample
+                print("Warning - sample too long : {0} (input : {1} / text : {2})".format(file_text[0],
+                      original_feat_vec_length, len(labels)))
+                continue
 
             assert len(labels) <= self.max_target_seq_length
             assert len(feat_vec) <= self.max_input_seq_length
@@ -181,16 +189,11 @@ class AcousticModel(object):
             target_lengths.append(len(labels))
             batch_counter += 1
 
-        remaining = len(dataset) - (already_processed + num_data_points)
-        if remaining == 0:
-            batch_pointer = 0
-        else:
-            batch_pointer += 1
         input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-        if is_train and self.train_conn != None:
+        if is_train and self.train_conn is not None:
             self.train_conn.send([input_feat_vecs, input_feat_vec_lengths,
                                   target_lengths, target_labels, target_indices, batch_pointer])
-        elif not is_train and self.test_conn != None:
+        elif not is_train and self.test_conn is not None:
             self.test_conn.send([input_feat_vecs, input_feat_vec_lengths,
                                  target_lengths, target_labels, target_indices, batch_pointer])
         else:
@@ -264,7 +267,6 @@ class AcousticModel(object):
         parent_train_conn, parent_test_conn = self.setConnections()
 
         num_test_batches = self.getNumBatches(test_set)
-        num_train_batches = self.getNumBatches(train_set)
 
         train_batch_pointer = 0
         test_batch_pointer = 0
@@ -283,7 +285,7 @@ class AcousticModel(object):
             # receive batch from pipe
             step_batch_inputs = parent_train_conn.recv()
 
-            train_batch_pointer = step_batch_inputs[5] % num_train_batches
+            train_batch_pointer = step_batch_inputs[5]
 
             # begin fetching other batch while graph processes previous one
             async_train_loader = Process(
@@ -321,7 +323,7 @@ class AcousticModel(object):
                     print("On {0}th training iteration".format(i))
                     eval_inputs = parent_test_conn.recv()
                     # async_test_loader.join()
-                    test_batch_pointer = eval_inputs[5] % num_test_batches
+                    test_batch_pointer = eval_inputs[5]
                     # tell audio processor to go get another batch ready
                     # while we run last one through the graph
                     if i != num_test_batches - 1:
