@@ -7,30 +7,51 @@ from models.AcousticModel import AcousticModel
 import tensorflow as tf
 import util.hyperparams as hyperparams
 import util.audioprocessor as audioprocessor
+import util.dataprocessor as dataprocessor
 import argparse
-
-
-flags = tf.app.flags
-FLAGS = flags.FLAGS
-flags.DEFINE_string("config_file", "config.ini", "Path to configuration file with hyper-parameters.")
+from math import floor
 
 
 def main():
-    serializer = hyperparams.HyperParameterHandler(FLAGS.config_file)
-    hyper_params = serializer.getHyperParams()
-    max_input_seq_length = hyper_params["max_input_seq_length"]
-    audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
     prog_params = parse_args()
+    serializer = hyperparams.HyperParameterHandler(prog_params['config_file'])
+    hyper_params = serializer.getHyperParams()
+    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"])
 
-    feat_vec, original_feat_vec_length = audio_processor.processFLACAudio(prog_params['file'])
-    if original_feat_vec_length > max_input_seq_length:
+    if prog_params['train'] is True:
+        train_rnn(hyper_params)
+    else:
+        process_file(audio_processor, hyper_params, prog_params['file'])
+
+
+def train_rnn(hyper_params):
+    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"])
+    text_audio_pairs = data_processor.run()
+    num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
+    train_set = text_audio_pairs[:num_train]
+    test_set = text_audio_pairs[num_train:]
+    print("Using {0} size of test set".format(len(test_set)))
+
+    with tf.Session() as sess:
+        # create model
+        print("Building model... (this takes a while)")
+        model = createAcousticModel(sess, hyper_params, False)
+        print("Setting up audio processor...")
+        model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
+        print("Start training...")
+        model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"], hyper_params["checkpoint_dir"])
+
+
+def process_file(audio_processor, hyper_params, file):
+    feat_vec, original_feat_vec_length = audio_processor.processFLACAudio(file)
+    if original_feat_vec_length > hyper_params["max_input_seq_length"]:
         print("File too long")
         return
 
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params)
+        model = createAcousticModel(sess, hyper_params, True)
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
@@ -48,7 +69,7 @@ def main():
         print(transcribed_text)
 
 
-def createAcousticModel(session, hyper_params):
+def createAcousticModel(session, hyper_params, forward_only):
     num_labels = 31
     input_dim = 123
     model = AcousticModel(num_labels, hyper_params["num_layers"],
@@ -58,7 +79,7 @@ def createAcousticModel(session, hyper_params):
                           hyper_params["max_input_seq_length"],
                           hyper_params["max_target_seq_length"],
                           input_dim,
-                          forward_only=True)
+                          forward_only=forward_only)
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
         print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
@@ -74,10 +95,19 @@ def parse_args():
     Parses the command line input.
 
     """
+    DEFAULT_CONFIG_FILE = 'config.ini'
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('file', type=str, help='wav file to process')
+    parser.add_argument('--config', type=str, default=DEFAULT_CONFIG_FILE,
+                        help='Path to configuration file with hyper-parameters.')
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.set_defaults(train=False)
+    group.add_argument('--train', dest='train', action='store_true', help='Train the network')
+    group.add_argument('--file', type=str, help='Path to a wav file to process')
+
     args = parser.parse_args()
-    prog_params = {'file': args.file}
+    prog_params = {'file': args.file, 'config_file': args.config, 'train': args.train}
     return prog_params
 
 
