@@ -16,7 +16,10 @@ except:
 import tensorflow.contrib.ctc as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
-
+from multiprocessing import Process, Pipe
+import time
+import sys
+import os
 
 class AcousticModel(object):
     def __init__(self, num_labels, num_layers, hidden_size, dropout,
@@ -47,14 +50,22 @@ class AcousticModel(object):
         self.dropout_keep_prob_lstm_output = tf.constant(self.dropout)
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
+
+        # Initialize data pipes to None
+        self.train_conn = None
+        self.test_conn = None
+
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
                                      shape=[self.max_input_seq_length, None, input_dim],
                                      name="inputs")
+        # We could take an int16 for less memory consumption but CTC need an int32
         self.input_seq_lengths = tf.placeholder(tf.int32,
                                                 shape=[None],
                                                 name="input_seq_lengths")
-        self.target_seq_lengths = tf.placeholder(tf.int32,
+        # Take an int16 for less memory consumption
+        # max_target_seq_length should be less than 65535 (which is huge)
+        self.target_seq_lengths = tf.placeholder(tf.int16,
                                                  shape=[None],
                                                  name="target_seq_lengths")
 
@@ -96,9 +107,11 @@ class AcousticModel(object):
             self.logits = tf.pack(self.logits)
         else:
             # graph sparse tensor inputs
+            # We could take an int16 for less memory consumption but SparseTensor need an int64
             self.target_indices = tf.placeholder(tf.int64,
                                                  shape=[None, 2],
                                                  name="target_indices")
+            # We could take an int8 for less memory consumption but CTC need an int32
             self.target_vals = tf.placeholder(tf.int32,
                                               shape=[None],
                                               name="target_vals")
@@ -134,9 +147,7 @@ class AcousticModel(object):
           input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
         '''
-        already_processed = self.batch_size * batch_pointer
-        num_data_points = min(self.batch_size, len(dataset[already_processed:]))
-        to_process = dataset[already_processed:already_processed + num_data_points]
+        initial_batch_pointer = batch_pointer
         input_feat_vecs = []
         input_feat_vec_lengths = []
         target_lengths = []
@@ -144,20 +155,25 @@ class AcousticModel(object):
         target_indices = []
 
         batch_counter = 0
-        for file_text in to_process:
+        while batch_counter < self.batch_size:
+            file_text = dataset[batch_pointer]
+            batch_pointer += 1
+            if batch_pointer == dataset.__len__():
+                batch_pointer = 0
+            assert batch_pointer != initial_batch_pointer
+
             # Process the audio file to get the input
             feat_vec, original_feat_vec_length = self.audio_processor.processFLACAudio(file_text[0])
             # Process the label to get the output
             labels = self.getStrLabels(file_text[1])
-
-            # Check max output size
-            if len(labels) > self.max_target_seq_length:
-                # Cut if too long
-                labels = labels[:self.max_target_seq_length]
-                # But if we didn't cut the audio file then we have a problem and we should not use this sample
-                if original_feat_vec_length <= self.max_input_seq_length:
-                    continue
             # Labels len does not need to be always the same as for input, don't need padding
+
+            # Check sizes
+            if (len(labels) > self.max_target_seq_length) or (original_feat_vec_length > self.max_input_seq_length):
+                # If either input or output vector is too long we shouldn't take this sample
+                print("Warning - sample too long : {0} (input : {1} / text : {2})".format(file_text[0],
+                      original_feat_vec_length, len(labels)))
+                continue
 
             assert len(labels) <= self.max_target_seq_length
             assert len(feat_vec) <= self.max_input_seq_length
@@ -173,16 +189,11 @@ class AcousticModel(object):
             target_lengths.append(len(labels))
             batch_counter += 1
 
-        remaining = len(dataset) - (already_processed + num_data_points)
-        if remaining == 0:
-            batch_pointer = 0
-        else:
-            batch_pointer += 1
         input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-        if is_train and self.train_conn != None:
+        if is_train and self.train_conn is not None:
             self.train_conn.send([input_feat_vecs, input_feat_vec_lengths,
                                   target_lengths, target_labels, target_indices, batch_pointer])
-        elif not is_train and self.test_conn != None:
+        elif not is_train and self.test_conn is not None:
             self.test_conn.send([input_feat_vecs, input_feat_vec_lengths,
                                  target_lengths, target_labels, target_indices, batch_pointer])
         else:
@@ -192,9 +203,12 @@ class AcousticModel(object):
     def initializeAudioProcessor(self, max_input_seq_length):
         self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
 
-    def setConnections(self, test_conn, train_conn):
-        self.train_conn = train_conn
-        self.test_conn = test_conn
+    def setConnections(self):
+        # setting up piplines to be able to load data async (one for test set, one for train)
+        # TODO tensorflow probably has something built in for this, look into it
+        parent_train_conn, self.train_conn = Pipe()
+        parent_test_conn, self.test_conn = Pipe()
+        return parent_train_conn, parent_test_conn
 
     def getCharLabel(self, char):
         '''
@@ -236,7 +250,6 @@ class AcousticModel(object):
         else:
             return outputs[0], outputs[1]
 
-
     def process_input(self, session, inputs, input_seq_lengths):
         '''
         Returns:
@@ -248,3 +261,78 @@ class AcousticModel(object):
         output_feed = [self.logits]
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
+
+    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir):
+        print("Setting up piplines to test and train data...")
+        parent_train_conn, parent_test_conn = self.setConnections()
+
+        num_test_batches = self.getNumBatches(test_set)
+
+        train_batch_pointer = 0
+        test_batch_pointer = 0
+
+        async_train_loader = Process(
+            target=self.getBatch,
+            args=(train_set, train_batch_pointer, True))
+        async_train_loader.start()
+
+        step_time, loss = 0.0, 0.0
+        current_step = 0
+        previous_losses = []
+        while True:
+            # begin timer
+            start_time = time.time()
+            # receive batch from pipe
+            step_batch_inputs = parent_train_conn.recv()
+
+            train_batch_pointer = step_batch_inputs[5]
+
+            # begin fetching other batch while graph processes previous one
+            async_train_loader = Process(
+                target=self.getBatch,
+                args=(train_set, train_batch_pointer, True))
+            async_train_loader.start()
+
+            _, step_loss = self.step(sess, step_batch_inputs[0], step_batch_inputs[1],
+                                      step_batch_inputs[2], step_batch_inputs[3],
+                                      step_batch_inputs[4], forward_only=False)
+
+            print("Step {0} with loss {1}".format(current_step, step_loss))
+            step_time += (time.time() - start_time) / steps_per_checkpoint
+            loss += step_loss / steps_per_checkpoint
+            current_step += 1
+            if current_step % steps_per_checkpoint == 0:
+                print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
+                      (self.global_step.eval(), self.learning_rate.eval(), step_time, loss))
+                # Decrease learning rate if no improvement was seen over last 3 times.
+                if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
+                    sess.run(self.learning_rate_decay_op)
+                previous_losses.append(loss)
+
+                checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
+                self.saver.save(sess, checkpoint_path, global_step=self.global_step)
+                step_time, loss = 0.0, 0.0
+                # begin loading test data async
+                # (uses different pipline than train data)
+                async_test_loader = Process(
+                    target=self.getBatch,
+                    args=(test_set, test_batch_pointer, False))
+                async_test_loader.start()
+                print(num_test_batches)
+                for i in range(num_test_batches):
+                    print("On {0}th training iteration".format(i))
+                    eval_inputs = parent_test_conn.recv()
+                    # async_test_loader.join()
+                    test_batch_pointer = eval_inputs[5]
+                    # tell audio processor to go get another batch ready
+                    # while we run last one through the graph
+                    if i != num_test_batches - 1:
+                        async_test_loader = Process(
+                            target=self.getBatch,
+                            args=(test_set, test_batch_pointer, False))
+                        async_test_loader.start()
+                    _, loss = self.step(sess, eval_inputs[0], eval_inputs[1],
+                                         eval_inputs[2], eval_inputs[3],
+                                         eval_inputs[4], forward_only=True)
+                print("\tTest: loss %.2f" % loss)
+                sys.stdout.flush()
