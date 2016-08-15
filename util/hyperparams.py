@@ -104,4 +104,6 @@ class HyperParameterHandler(object):
         dic["training_dataset_dir"] = config.get(training_section, "training_dataset_dir")
         dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
         dic["max_target_seq_length"] = config.getint(training_section, "max_target_seq_length")
+        dic["load_save_input_vec"] = config.getboolean(training_section, "load_save_input_vec", fallback=False)
+
         return dic

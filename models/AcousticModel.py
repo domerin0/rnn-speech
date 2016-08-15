@@ -205,8 +205,8 @@ class AcousticModel(object):
             return [input_feat_vecs, input_feat_vec_lengths,
                     target_lengths, target_labels, target_indices, batch_pointer]
 
-    def initializeAudioProcessor(self, max_input_seq_length):
-        self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
+    def initializeAudioProcessor(self, max_input_seq_length, load_save_input_vec):
+        self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length, load_save_input_vec)
 
     def setConnections(self):
         # setting up piplines to be able to load data async (one for test set, one for train)
