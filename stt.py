@@ -35,7 +35,7 @@ def train_rnn(hyper_params):
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params, False)
+        model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"], False)
         print("Setting up audio processor...")
         model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
         print("Start training...")
@@ -51,7 +51,7 @@ def process_file(audio_processor, hyper_params, file):
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params, True)
+        model = createAcousticModel(sess, hyper_params, 1, True)
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
@@ -69,12 +69,12 @@ def process_file(audio_processor, hyper_params, file):
         print(transcribed_text)
 
 
-def createAcousticModel(session, hyper_params, forward_only):
+def createAcousticModel(session, hyper_params, batch_size, forward_only):
     num_labels = 31
     input_dim = 123
     model = AcousticModel(num_labels, hyper_params["num_layers"],
                           hyper_params["hidden_size"], hyper_params["dropout"],
-                          1, hyper_params["learning_rate"],
+                          batch_size, hyper_params["learning_rate"],
                           hyper_params["lr_decay_factor"], hyper_params["grad_clip"],
                           hyper_params["max_input_seq_length"],
                           hyper_params["max_target_seq_length"],
