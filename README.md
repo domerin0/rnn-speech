@@ -45,16 +45,23 @@ It will remove the tar files after downloading and unzipping.
 All hyper parameters for the network are defined in `config.ini`. A different config file can be fed to the training program
 using something like:
 
-``$ python train.py --config_file="different_config_file.ini"``
+``$ python stt.py --config_file="different_config_file.ini"``
 
 You should ensure it follows the same format as the one I've provided.
 
 ####Running Optimizer
 Once your dependencies are set up, and data is downloaded and extracted into the appropriate location, the optimizer can be started by doing:
 
-``$ python train.py``
+``$ python stt.py --train``
 
 Dynamic RNNs are used as memory consumption on the entirely unrolled network was massive, and the model would take 30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it (as the model can now fit on a single GPU).
+
+####Running the network
+You can also use a trained network to process a wav fil
+
+``$ python stt.py --file "path_to_file.wav"``
+
+The result will be printed on standard input. At this time only the acoustic model will process so the result can be weird.  
 
 ###Project Road Map
 
