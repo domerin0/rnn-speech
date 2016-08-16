@@ -10,7 +10,7 @@ from python_speech_features import fbank
 import scipy.io.wavfile as wav
 import numpy as np
 import os
-import pickle
+import h5py
 
 
 class AudioProcessor(object):
@@ -24,16 +24,18 @@ class AudioProcessor(object):
         Returns padded feature tensor and unpadded length
         '''
         # Check if computed input vector already exists
-        if self.load_save_input_vec and os.path.exists(wav_file_name.replace(".wav", ".lmfb")):
-            with open(wav_file_name.replace(".wav", ".lmfb"), 'rb') as handle:
-                [feat_vec, original_feat_vec_length] = pickle.load(handle)
+        if self.load_save_input_vec and os.path.exists(wav_file_name.replace(".wav", ".h5")):
+            with h5py.File(wav_file_name.replace(".wav", ".h5"), 'r') as hf:
+                feat_vec = hf['feat_vec'].value
+                original_feat_vec_length = hf['original_feat_vec_length'].value
         else:
             feat_vec = self.computeLogMelFilterBank(wav_file_name)
             original_feat_vec_length = len(feat_vec)
             # Save the file if needed
             if self.load_save_input_vec:
-                with open(wav_file_name.replace(".wav", ".lmfb"), 'wb') as handle:
-                    pickle.dump([feat_vec, original_feat_vec_length], handle)
+                with h5py.File(wav_file_name.replace(".wav", ".h5"), 'w') as hf:
+                    hf.create_dataset('feat_vec', data=feat_vec)
+                    hf.create_dataset('original_feat_vec_length', data=original_feat_vec_length)
 
         if original_feat_vec_length > self.max_input_seq_length:
             # Audio sequence too long, need to cut
