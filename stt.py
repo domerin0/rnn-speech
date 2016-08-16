@@ -40,7 +40,8 @@ def train_rnn(hyper_params):
         print("Setting up audio processor...")
         model.initializeAudioProcessor(hyper_params["max_input_seq_length"], hyper_params["load_save_input_vec"])
         print("Start training...")
-        model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"], hyper_params["checkpoint_dir"])
+        model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
+                    hyper_params["checkpoint_dir"], hyper_params["async_get_batch"])
 
 
 def process_file(audio_processor, hyper_params, file):
