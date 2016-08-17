@@ -10,20 +10,32 @@ from python_speech_features import fbank
 import scipy.io.wavfile as wav
 import numpy as np
 import os
+import h5py
 
 
 class AudioProcessor(object):
-    def __init__(self, max_input_seq_length):
-        self.master_file_list = "master_file_list.txt"
+    def __init__(self, max_input_seq_length, load_save_input_vec=False):
         self.max_input_seq_length = max_input_seq_length
+        self.load_save_input_vec = load_save_input_vec
 
     def processFLACAudio(self, wav_file_name):
         '''
         Reads in audio file, processes it
         Returns padded feature tensor and unpadded length
         '''
-        feat_vec = self.computeLogMelFilterBank(wav_file_name)
-        original_feat_vec_length = len(feat_vec)
+        # Check if computed input vector already exists
+        if self.load_save_input_vec and os.path.exists(wav_file_name.replace(".wav", ".h5")):
+            with h5py.File(wav_file_name.replace(".wav", ".h5"), 'r') as hf:
+                feat_vec = hf['feat_vec'].value
+                original_feat_vec_length = hf['original_feat_vec_length'].value
+        else:
+            feat_vec = self.computeLogMelFilterBank(wav_file_name)
+            original_feat_vec_length = len(feat_vec)
+            # Save the file if needed
+            if self.load_save_input_vec:
+                with h5py.File(wav_file_name.replace(".wav", ".h5"), 'w') as hf:
+                    hf.create_dataset('feat_vec', data=feat_vec)
+                    hf.create_dataset('original_feat_vec_length', data=original_feat_vec_length)
 
         if original_feat_vec_length > self.max_input_seq_length:
             # Audio sequence too long, need to cut

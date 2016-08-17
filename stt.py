@@ -16,7 +16,8 @@ def main():
     prog_params = parse_args()
     serializer = hyperparams.HyperParameterHandler(prog_params['config_file'])
     hyper_params = serializer.getHyperParams()
-    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"])
+    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
+                                                    hyper_params["load_save_input_vec"])
 
     if prog_params['train'] is True:
         train_rnn(hyper_params)
@@ -37,9 +38,10 @@ def train_rnn(hyper_params):
         print("Building model... (this takes a while)")
         model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"], False)
         print("Setting up audio processor...")
-        model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
+        model.initializeAudioProcessor(hyper_params["max_input_seq_length"], hyper_params["load_save_input_vec"])
         print("Start training...")
-        model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"], hyper_params["checkpoint_dir"])
+        model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
+                    hyper_params["checkpoint_dir"], hyper_params["async_get_batch"])
 
 
 def process_file(audio_processor, hyper_params, file):

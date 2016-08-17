@@ -104,4 +104,10 @@ class HyperParameterHandler(object):
         dic["training_dataset_dir"] = config.get(training_section, "training_dataset_dir")
         dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
         dic["max_target_seq_length"] = config.getint(training_section, "max_target_seq_length")
+        dic["load_save_input_vec"] = config.getboolean(training_section, "load_save_input_vec", fallback=False)
+        dic["async_get_batch"] = config.getboolean(training_section, "async_get_batch", fallback=False)
+
+        if dic["load_save_input_vec"] == True and dic["async_get_batch"] == True:
+            raise Exception("load_save_input_vec and async_get_batch cannot be activated simultaneously")
+
         return dic
