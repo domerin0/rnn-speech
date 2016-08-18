@@ -25,11 +25,14 @@ from multiprocessing import Process, Pipe
 import time
 import sys
 import os
+from datetime import datetime
+
 
 class AcousticModel(object):
     def __init__(self, num_labels, num_layers, hidden_size, dropout,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
-                 max_input_seq_length, max_target_seq_length, input_dim, forward_only=False):
+                 max_input_seq_length, max_target_seq_length, input_dim,
+                 forward_only=False, tensorboard_dir=None):
         '''
         Acoustic rnn model, using ctc loss with lstm cells
         Inputs:
@@ -45,16 +48,23 @@ class AcousticModel(object):
         max_target_seq_length - maximum length of ouput vector sequence
         input_dim - dimension of input vector
         forward_only - whether to build back prop nodes or not
+        tensorboard_dir - path to tensorboard file (None if not activated)
         '''
+        # Define GraphKeys for TensorBoard
+        graphkey_training = tf.GraphKeys()
+        graphkey_test = tf.GraphKeys()
+
         self.dropout = dropout
         self.batch_size = batch_size
-        self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
+        self.learning_rate = tf.Variable(float(learning_rate), trainable=False, name='learning_rate')
+        tf.scalar_summary('Learning rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
         self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * lr_decay_factor)
-        self.global_step = tf.Variable(0, trainable=False)
+        self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.dropout_keep_prob_lstm_input = tf.constant(self.dropout)
         self.dropout_keep_prob_lstm_output = tf.constant(self.dropout)
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
+        self.tensorboard_dir = tensorboard_dir
 
         # Initialize data pipes to None
         self.train_conn = None
@@ -95,22 +105,22 @@ class AcousticModel(object):
         initial_state = cell.zero_state(self.batch_size, tf.float32)
 
         # build rnn
-        rnn_output, self.hidden_state = rnn.dynamic_rnn(cell, tf.pack(inputs),
-                                                        sequence_length=self.input_seq_lengths,
-                                                        initial_state=initial_state,
-                                                        time_major=True, parallel_iterations=1000)
+        with tf.name_scope('Dynamic_rnn'):
+            rnn_output, self.hidden_state = rnn.dynamic_rnn(cell, tf.pack(inputs),
+                                                            sequence_length=self.input_seq_lengths,
+                                                            initial_state=initial_state,
+                                                            time_major=True, parallel_iterations=1000)
 
         # build output layer
-        w_o = tf.get_variable("output_w", [hidden_size, num_labels])
-        b_o = tf.get_variable("output_b", [num_labels])
+        with tf.name_scope('Output_layer'):
+            w_o = tf.get_variable("output_w", [hidden_size, num_labels])
+            b_o = tf.get_variable("output_b", [num_labels])
 
         # compute logits
-        self.logits = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
-                       for i in tf.split(0, self.max_input_seq_length, rnn_output)]
+        self.logits = tf.pack([tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
+                               for i in tf.split(0, self.max_input_seq_length, rnn_output)])
 
-        if forward_only:
-            self.logits = tf.pack(self.logits)
-        else:
+        if not forward_only:
             # graph sparse tensor inputs
             # We could take an int16 for less memory consumption but SparseTensor need an int64
             self.target_indices = tf.placeholder(tf.int64,
@@ -128,9 +138,11 @@ class AcousticModel(object):
                 shape=[self.batch_size, self.max_target_seq_length])
 
             # compute ctc loss
-            self.ctc_loss = ctc.ctc_loss(tf.pack(self.logits), sparse_labels,
+            self.ctc_loss = ctc.ctc_loss(self.logits, sparse_labels,
                                          self.input_seq_lengths)
             self.mean_loss = tf.reduce_mean(self.ctc_loss)
+            tf.scalar_summary('Mean loss (Training)', self.mean_loss, collections=[graphkey_training])
+            tf.scalar_summary('Mean loss (Test)', self.mean_loss, collections=[graphkey_test])
             params = tf.trainable_variables()
 
             opt = tf.train.GradientDescentOptimizer(self.learning_rate)
@@ -139,6 +151,34 @@ class AcousticModel(object):
                                                              grad_clip)
             self.update = opt.apply_gradients(zip(clipped_gradients, params),
                                               global_step=self.global_step)
+
+            # Accuracy
+            with tf.name_scope('Accuracy'):
+                with tf.name_scope('Correct_prediction'):
+                    labels = tf.sparse_to_dense(self.target_indices, [self.batch_size, self.max_target_seq_length],
+                                                self.target_vals, default_value=0, validate_indices=True,
+                                                name='Labels')
+                    decoded, _ = ctc.ctc_greedy_decoder(self.logits, self.input_seq_lengths)
+                    prediction = tf.sparse_to_dense(decoded[0].indices, [self.batch_size, self.max_input_seq_length],
+                                                    decoded[0].values, default_value=0, validate_indices=True,
+                                                    name='Prediction')
+                    prediction = tf.slice(prediction, [0, 0], [self.batch_size, self.max_target_seq_length])
+                    tf.histogram_summary('Prediction', prediction, collections=[graphkey_test])
+                    tf.histogram_summary('Labels', labels, collections=[graphkey_test])
+                    correct_prediction = tf.equal(tf.cast(prediction, tf.int32), labels)
+                with tf.name_scope('Accuracy'):
+                    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+                tf.scalar_summary('Accuracy (Training)', accuracy, collections=[graphkey_training])
+                tf.scalar_summary('Accuracy (Test)', accuracy, collections=[graphkey_test])
+
+        # TensorBoard init
+        if self.tensorboard_dir is not None:
+            self.train_summaries = tf.merge_all_summaries(key=graphkey_training)
+            self.test_summaries = tf.merge_all_summaries(key=graphkey_test)
+            now = datetime.now().strftime('%Y-%m-%d--%H-%M-%S')
+            self.summary_writer = tf.train.SummaryWriter(tensorboard_dir + '/' + now + '/')
+        else:
+            self.summary_writer = None
 
         self.saver = tf.train.Saver(tf.all_variables())
 
@@ -245,15 +285,21 @@ class AcousticModel(object):
         input_feed[self.target_seq_lengths.name] = np.array(target_seq_lengths)
         input_feed[self.target_indices.name] = np.array(target_indices)
         input_feed[self.target_vals.name] = target_vals
+        # Base output is ctc_loss and mean_loss
+        output_feed = [self.ctc_loss, self.mean_loss]
+        # If a tensorboard dir is configured then we add an merged_summaries operation
+        if self.tensorboard_dir is not None:
+            if forward_only:
+                output_feed.append(self.test_summaries)
+            else:
+                output_feed.append(self.train_summaries)
+        # If we are in training then we add the update operation
         if not forward_only:
-            output_feed = [self.ctc_loss, self.update, self.mean_loss]
-        else:
-            output_feed = [self.ctc_loss, self.mean_loss]
+            output_feed.append(self.update)
         outputs = session.run(output_feed, input_feed)
-        if not forward_only:
-            return outputs[0], outputs[2]
-        else:
-            return outputs[0], outputs[1]
+        if self.tensorboard_dir is not None:
+            self.summary_writer.add_summary(outputs[2], self.global_step.eval())
+        return outputs[0], outputs[1]
 
     def process_input(self, session, inputs, input_seq_lengths):
         '''
@@ -301,8 +347,8 @@ class AcousticModel(object):
             train_batch_pointer = step_batch_inputs[5]
 
             _, step_loss = self.step(sess, step_batch_inputs[0], step_batch_inputs[1],
-                                      step_batch_inputs[2], step_batch_inputs[3],
-                                      step_batch_inputs[4], forward_only=False)
+                                     step_batch_inputs[2], step_batch_inputs[3],
+                                     step_batch_inputs[4], forward_only=False)
 
             print("Step {0} with loss {1}".format(current_step, step_loss))
             step_time += (time.time() - start_time) / steps_per_checkpoint
@@ -346,7 +392,7 @@ class AcousticModel(object):
                     test_batch_pointer = eval_inputs[5]
 
                     _, loss = self.step(sess, eval_inputs[0], eval_inputs[1],
-                                         eval_inputs[2], eval_inputs[3],
-                                         eval_inputs[4], forward_only=True)
+                                        eval_inputs[2], eval_inputs[3],
+                                        eval_inputs[4], forward_only=True)
                 print("\tTest: loss %.2f" % loss)
                 sys.stdout.flush()

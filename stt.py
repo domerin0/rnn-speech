@@ -80,8 +80,8 @@ def createAcousticModel(session, hyper_params, batch_size, forward_only):
                           hyper_params["lr_decay_factor"], hyper_params["grad_clip"],
                           hyper_params["max_input_seq_length"],
                           hyper_params["max_target_seq_length"],
-                          input_dim,
-                          forward_only=forward_only)
+                          input_dim, forward_only=forward_only,
+                          tensorboard_dir=hyper_params["tensorboard_dir"])
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
         print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
