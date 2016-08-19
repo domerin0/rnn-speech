@@ -1,6 +1,7 @@
-'''
+# coding=utf-8
+"""
 Main program to use the speech recognizer.
-'''
+"""
 
 from tensorflow.python.platform import gfile
 from models.AcousticModel import AcousticModel
@@ -26,7 +27,8 @@ def main():
 
 
 def train_rnn(hyper_params):
-    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"])
+    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"],
+                                                 hyper_params["training_dataset_type"])
     text_audio_pairs = data_processor.run()
     num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
     train_set = text_audio_pairs[:num_train]

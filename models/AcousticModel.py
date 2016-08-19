@@ -1,4 +1,5 @@
-'''
+# coding=utf-8
+"""
 Based on the paper:
 
 http://arxiv.org/pdf/1601.06581v2.pdf
@@ -6,7 +7,7 @@ http://arxiv.org/pdf/1601.06581v2.pdf
 This model is:
 
 acoustic RNN trained with ctc loss
-'''
+"""
 
 import tensorflow as tf
 try:
@@ -33,7 +34,7 @@ class AcousticModel(object):
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
                  max_input_seq_length, max_target_seq_length, input_dim,
                  forward_only=False, tensorboard_dir=None):
-        '''
+        """
         Acoustic rnn model, using ctc loss with lstm cells
         Inputs:
         num_labels - dimension of character input/one hot encoding
@@ -49,7 +50,7 @@ class AcousticModel(object):
         input_dim - dimension of input vector
         forward_only - whether to build back prop nodes or not
         tensorboard_dir - path to tensorboard file (None if not activated)
-        '''
+        """
         # Define GraphKeys for TensorBoard
         graphkey_training = tf.GraphKeys()
         graphkey_test = tf.GraphKeys()
@@ -66,9 +67,10 @@ class AcousticModel(object):
         self.max_target_seq_length = max_target_seq_length
         self.tensorboard_dir = tensorboard_dir
 
-        # Initialize data pipes to None
+        # Initialize data pipes and audio_processor to None
         self.train_conn = None
         self.test_conn = None
+        self.audio_processor = None
 
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
@@ -183,7 +185,7 @@ class AcousticModel(object):
         self.saver = tf.train.Saver(tf.all_variables())
 
     def getBatch(self, dataset, batch_pointer, is_train):
-        '''
+        """
         Inputs:
           dataset - tuples of (wav file, transcribed_text)
           batch_pointer - start point in dataset from where to take the batch
@@ -191,7 +193,7 @@ class AcousticModel(object):
         Returns:
           input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
-        '''
+        """
         initial_batch_pointer = batch_pointer
         input_feat_vecs = []
         input_feat_vec_lengths = []
@@ -250,23 +252,15 @@ class AcousticModel(object):
 
     def setConnections(self):
         # setting up piplines to be able to load data async (one for test set, one for train)
-        # TODO tensorflow probably has something built in for this, look into it
         parent_train_conn, self.train_conn = Pipe()
         parent_test_conn, self.test_conn = Pipe()
         return parent_train_conn, parent_test_conn
 
-    def getCharLabel(self, char):
-        '''
-        char is a length 1 string
-        '''
-        assert len(char) == 1
-        # _ will be used as eos character
-        return "abcdefghijklmnopqrstuvwxyz .'_-".index(char)
-
-    def getStrLabels(self, _str):
-        allowed_chars = "abcdefghijklmnopqrstuvwxyz .'_-"
+    @staticmethod
+    def getStrLabels(_str):
+        allowed_chars = "abcdefghijklmnopqrstuvwxyz .'-_"
         # add eos char
-        _str += "-"
+        _str += "_"
         return [allowed_chars.index(char) for char in _str]
 
     def getNumBatches(self, dataset):
@@ -274,17 +268,14 @@ class AcousticModel(object):
 
     def step(self, session, inputs, input_seq_lengths, target_seq_lengths,
              target_vals, target_indices, forward_only=False):
-        '''
+        """
         Returns:
         ctc_loss, None
         ctc_loss, None
-        '''
-        input_feed = {}
-        input_feed[self.inputs.name] = np.array(inputs)
-        input_feed[self.input_seq_lengths.name] = np.array(input_seq_lengths)
-        input_feed[self.target_seq_lengths.name] = np.array(target_seq_lengths)
-        input_feed[self.target_indices.name] = np.array(target_indices)
-        input_feed[self.target_vals.name] = target_vals
+        """
+        input_feed = {self.inputs.name: np.array(inputs), self.input_seq_lengths.name: np.array(input_seq_lengths),
+                      self.target_seq_lengths.name: np.array(target_seq_lengths),
+                      self.target_indices.name: np.array(target_indices), self.target_vals.name: target_vals}
         # Base output is ctc_loss and mean_loss
         output_feed = [self.ctc_loss, self.mean_loss]
         # If a tensorboard dir is configured then we add an merged_summaries operation
@@ -302,10 +293,10 @@ class AcousticModel(object):
         return outputs[0], outputs[1]
 
     def process_input(self, session, inputs, input_seq_lengths):
-        '''
+        """
         Returns:
           Translated text
-        '''
+        """
         input_feed = {}
         input_feed[self.inputs.name] = np.array(inputs)
         input_feed[self.input_seq_lengths.name] = np.array(input_seq_lengths)
@@ -327,9 +318,10 @@ class AcousticModel(object):
                 args=(train_set, train_batch_pointer, True))
             async_train_loader.start()
 
-        step_time, loss = 0.0, 0.0
+        step_time, mean_loss = 0.0, 0.0
         current_step = 0
-        previous_losses = []
+        previous_loss = 0
+        no_improvement_since = 0
         while True:
             # begin timer
             start_time = time.time()
@@ -349,22 +341,27 @@ class AcousticModel(object):
             _, step_loss = self.step(sess, step_batch_inputs[0], step_batch_inputs[1],
                                      step_batch_inputs[2], step_batch_inputs[3],
                                      step_batch_inputs[4], forward_only=False)
+            # Decrease learning rate if no improvement was seen over last 6 steps
+            if step_loss >= previous_loss:
+                no_improvement_since += 1
+                if no_improvement_since == 6:
+                    sess.run(self.learning_rate_decay_op)
+                    no_improvement_since = 0
+            else:
+                no_improvement_since = 0
+            previous_loss = step_loss
 
             print("Step {0} with loss {1}".format(current_step, step_loss))
             step_time += (time.time() - start_time) / steps_per_checkpoint
-            loss += step_loss / steps_per_checkpoint
+            mean_loss += step_loss / steps_per_checkpoint
             current_step += 1
             if current_step % steps_per_checkpoint == 0:
                 print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
-                      (self.global_step.eval(), self.learning_rate.eval(), step_time, loss))
-                # Decrease learning rate if no improvement was seen over last 3 times.
-                if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
-                    sess.run(self.learning_rate_decay_op)
-                previous_losses.append(loss)
+                      (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))
 
                 checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
                 self.saver.save(sess, checkpoint_path, global_step=self.global_step)
-                step_time, loss = 0.0, 0.0
+                step_time, mean_loss = 0.0, 0.0
 
                 if async_get_batch:
                     # begin loading test data async
@@ -391,8 +388,8 @@ class AcousticModel(object):
 
                     test_batch_pointer = eval_inputs[5]
 
-                    _, loss = self.step(sess, eval_inputs[0], eval_inputs[1],
+                    _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
                                         eval_inputs[2], eval_inputs[3],
                                         eval_inputs[4], forward_only=True)
-                print("\tTest: loss %.2f" % loss)
+                print("\tTest: loss %.2f" % step_loss)
                 sys.stdout.flush()

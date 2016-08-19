@@ -1,30 +1,40 @@
-'''
+# coding=utf-8
+"""
 Reads in audio and text data, transforming it for input into the neural nets
 It will download and extract the dataset.
 
 TODO generalize it for any audio and corresponding text data
 
 Curently it will only work for one specific dataset.
-'''
+"""
 import os
 from random import shuffle
 import util.audioprocessor as audioprocessor
-
+try:
+    import ConfigParser as configparser
+except ImportError:
+    import configparser
 
 class DataProcessor(object):
-    def __init__(self, raw_data_path):
+    def __init__(self, raw_data_path, data_type):
         self.raw_data_path = raw_data_path
-        self.data_dirs = self.checkWhichDataFoldersArePresent()
+        self.data_type = data_type
 
     def run(self):
-        # Check which data folders are present
-        if len(self.data_dirs) == 0:
-            print("Something went wrong, no data detected, check data directory..")
-            return
-
-        # Get pairs of (audio_file_name, transcribed_text)
         print("Figuring out which files need to be processed...")
-        audio_file_text_pairs, will_convert = self.getFileNameTextPairs()
+        if self.data_type == "Shtooka":
+            audio_file_text_pairs, will_convert = self.getFileNameTextPairs_Shtooka(self.raw_data_path)
+        elif self.data_type == "LibriSpeech":
+            data_dirs = self.checkWhichDataFoldersArePresent()
+            # Check which data folders are present
+            if len(data_dirs) == 0:
+                print("Something went wrong, no data detected, check data directory..")
+                return
+            # Get pairs of (audio_file_name, transcribed_text)
+            audio_file_text_pairs, will_convert = self.getFileNameTextPairs_LibriSpeech(data_dirs)
+        else:
+            raise Exception("unknown training_dataset_type")
+
         print("Using {0} files in total dataset...".format(len(audio_file_text_pairs)))
         # Shuffle pairs
         shuffle(audio_file_text_pairs)
@@ -44,7 +54,7 @@ class DataProcessor(object):
 
         return audio_file_text_pairs_final
 
-    def getFileNameTextPairs(self):
+    def getFileNameTextPairs_LibriSpeech(self, data_dirs):
         '''
         Returns
           a list of tuples (audio_file_name, transcribed_text)
@@ -53,32 +63,25 @@ class DataProcessor(object):
         audio_file_text_pairs = []
         # Assume there will not need any conversion
         will_convert = False
-        for d in self.data_dirs:
+        for d in data_dirs:
             root_search_path = os.path.join(self.raw_data_path, d)
-            for root, subdirs, files in os.walk(root_search_path):
-                flac_audio_files = [os.path.join(root, audio_file)
-                                    for audio_file in files if audio_file.endswith(".flac")]
-                wav_audio_files = [os.path.join(root, audio_file)
-                                   for audio_file in files if audio_file.endswith(".wav")]
-                text_files = [os.path.join(root, text_file) for
-                              text_file in files if text_file.endswith(".txt")]
-                if len(flac_audio_files) > 0:
-                    # We have at least one file to convert
-                    will_convert = True
-                audio_files = wav_audio_files + flac_audio_files
-                if len(audio_files) >= 1 and len(text_files) >= 1:
-                    assert len(text_files) == 1, "Issue detected with data directory structure..."
-                    with open(text_files[0], "r") as f:
-                        lines = f.read().split("\n")
-                        for a_file in audio_files:
-                            # This might only work on linux
-                            audio_file_name = os.path.basename(a_file)
-                            head = audio_file_name.replace(".flac", "").replace(".wav", "")
-                            for line in lines:
-                                if head in line:
-                                    text = line.replace(head, "").strip().lower() + "_"
-                                    audio_file_text_pairs.append((a_file, text))
-                                    break
+            flac_audio_files, wav_audio_files, text_files = self.findFiles(root_search_path)
+            if len(flac_audio_files) > 0:
+                # We have at least one file to convert
+                will_convert = True
+            audio_files = wav_audio_files + flac_audio_files
+            for text_file in text_files:
+                with open(text_file, "r") as f:
+                    lines = f.read().split("\n")
+                    for line in lines:
+                        head = line.split(' ')[0]
+                        if len(head) < 5:
+                            # Not a line with a file desc
+                            break
+                        matches = next((filepath for filepath in audio_files if filepath.find(head) >= 0), None)
+                        if matches is not None:
+                            audio_file_text_pairs.append((matches, line.replace(head, "").strip().lower()))
+
         return audio_file_text_pairs, will_convert
 
     def checkWhichDataFoldersArePresent(self):
@@ -91,3 +94,34 @@ class DataProcessor(object):
             if d in dirs_to_check:
                 dirs_allowed.append(d)
         return dirs_allowed
+
+    @staticmethod
+    def findFiles(root_search_path):
+        flac_audio_files, wav_audio_files, text_files = [], [], []
+        for root, _, files in os.walk(root_search_path):
+            flac_audio_files.extend([os.path.join(root, audio_file)
+                                    for audio_file in files if audio_file.endswith(".flac")])
+            wav_audio_files.extend([os.path.join(root, audio_file)
+                                   for audio_file in files if audio_file.endswith(".wav")])
+            text_files.extend([os.path.join(root, text_file)
+                              for text_file in files if text_file.endswith(".txt")])
+        return flac_audio_files, wav_audio_files, text_files
+
+    def getFileNameTextPairs_Shtooka(self, raw_data_path):
+        config = configparser.ConfigParser(comment_prefixes=('#', ';', "\\"))
+        flac_audio_files, wav_audio_files, text_files = self.findFiles(raw_data_path)
+        audio_files = wav_audio_files + flac_audio_files
+        # Build from index_tags
+        audio_file_text_pairs = []
+        for file in text_files:
+            if file.endswith("index.tags.txt"):
+                config = configparser.ConfigParser(comment_prefixes=('#', ';', "\\"))
+                config.read(file)
+                for section in config.sections():
+                    audio_file = [audio_file for audio_file in audio_files if audio_file.endswith(section) or
+                                  audio_file.endswith(section.replace(".flac", ".wav"))]
+                    if len(audio_file) > 0:
+                        audio_file_text_pairs.append([audio_file[0],
+                                                      config[section]['SWAC_TEXT'].strip().lower().replace("_", "-")])
+        return audio_file_text_pairs, len(flac_audio_files) > 0
+

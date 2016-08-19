@@ -1,7 +1,8 @@
-'''
+# coding=utf-8
+"""
 This is the main logic for serializing and deserializing dictionaries
 of hyperparameters (for use in checkpoint restoration and sampling)
-'''
+"""
 import os
 import pickle
 import time
@@ -13,9 +14,9 @@ except ImportError:
 
 class HyperParameterHandler(object):
     def __init__(self, config_file):
-        '''
+        """
         Retrieves hyper parameter information from either config file or checkpoint
-        '''
+        """
         self.hyper_params = self.readConfigFile(config_file)
 
         print("Using checkpoint {0}".format(self.hyper_params["checkpoint_dir"]))
@@ -62,9 +63,9 @@ class HyperParameterHandler(object):
             return pickle.load(handle)
 
     def checkExists(self):
-        '''
+        """
         Checks if hyper parameter file exists
-        '''
+        """
         return os.path.exists(self.file_path)
 
     def checkChanged(self, new_params):
@@ -80,9 +81,9 @@ class HyperParameterHandler(object):
             return False
 
     def readConfigFile(self, config_file):
-        '''
+        """
         Reads in config file, returns dictionary of network params
-        '''
+        """
         config = configparser.ConfigParser()
         config.read(config_file)
         dic = {}
@@ -102,6 +103,7 @@ class HyperParameterHandler(object):
         dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
         dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
         dic["training_dataset_dir"] = config.get(training_section, "training_dataset_dir")
+        dic["training_dataset_type"] = config.get(training_section, "training_dataset_type")
         dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
         dic["max_target_seq_length"] = config.getint(training_section, "max_target_seq_length")
         dic["load_save_input_vec"] = config.getboolean(training_section, "load_save_input_vec", fallback=False)
