@@ -108,20 +108,21 @@ class DataProcessor(object):
         return flac_audio_files, wav_audio_files, text_files
 
     def getFileNameTextPairs_Shtooka(self, raw_data_path):
-        config = configparser.ConfigParser(comment_prefixes=('#', ';', "\\"))
-        flac_audio_files, wav_audio_files, text_files = self.findFiles(raw_data_path)
-        audio_files = wav_audio_files + flac_audio_files
+        flac_audio_files, _, text_files = self.findFiles(raw_data_path)
         # Build from index_tags
         audio_file_text_pairs = []
         for file in text_files:
             if file.endswith("index.tags.txt"):
                 config = configparser.ConfigParser(comment_prefixes=('#', ';', "\\"))
                 config.read(file)
+                root = file.replace("index.tags.txt", "")
                 for section in config.sections():
-                    audio_file = [audio_file for audio_file in audio_files if audio_file.endswith(section) or
-                                  audio_file.endswith(section.replace(".flac", ".wav"))]
-                    if len(audio_file) > 0:
-                        audio_file_text_pairs.append([audio_file[0],
+                    audio_file = root + section
+                    if os.path.exists(audio_file):
+                        audio_file_text_pairs.append([audio_file,
+                                                      config[section]['SWAC_TEXT'].strip().lower().replace("_", "-")])
+                    elif os.path.exists(audio_file.replace(".flac", ".wav")):
+                        audio_file_text_pairs.append([audio_file.replace(".flac", ".wav"),
                                                       config[section]['SWAC_TEXT'].strip().lower().replace("_", "-")])
         return audio_file_text_pairs, len(flac_audio_files) > 0
 
