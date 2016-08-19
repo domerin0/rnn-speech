@@ -104,13 +104,13 @@ class AcousticModel(object):
                   for i in tf.split(0, self.max_input_seq_length, self.inputs)]
 
         # set rnn init state to 0s
-        initial_state = cell.zero_state(self.batch_size, tf.float32)
+        self.hidden_state = tf.Variable(cell.zero_state(self.batch_size, tf.float32), trainable=False)
 
         # build rnn
         with tf.name_scope('Dynamic_rnn'):
             rnn_output, self.hidden_state = rnn.dynamic_rnn(cell, tf.pack(inputs),
                                                             sequence_length=self.input_seq_lengths,
-                                                            initial_state=initial_state,
+                                                            initial_state=self.hidden_state,
                                                             time_major=True, parallel_iterations=1000)
 
         # build output layer
@@ -182,7 +182,8 @@ class AcousticModel(object):
         else:
             self.summary_writer = None
 
-        self.saver = tf.train.Saver(tf.all_variables())
+        save_list = [self.learning_rate, self.global_step, w_i, b_i, w_o, b_o]
+        self.saver = tf.train.Saver(save_list)
 
     def getBatch(self, dataset, batch_pointer, is_train):
         """
@@ -297,9 +298,7 @@ class AcousticModel(object):
         Returns:
           Translated text
         """
-        input_feed = {}
-        input_feed[self.inputs.name] = np.array(inputs)
-        input_feed[self.input_seq_lengths.name] = np.array(input_seq_lengths)
+        input_feed = {self.inputs.name: np.array(inputs), self.input_seq_lengths.name: np.array(input_seq_lengths)}
         output_feed = [self.logits]
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
@@ -389,7 +388,7 @@ class AcousticModel(object):
                     test_batch_pointer = eval_inputs[5]
 
                     _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
-                                        eval_inputs[2], eval_inputs[3],
-                                        eval_inputs[4], forward_only=True)
+                                             eval_inputs[2], eval_inputs[3],
+                                             eval_inputs[4], forward_only=True)
                 print("\tTest: loss %.2f" % step_loss)
                 sys.stdout.flush()

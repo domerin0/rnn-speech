@@ -90,7 +90,8 @@ def createAcousticModel(session, hyper_params, batch_size, forward_only):
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
         print("Created model with fresh parameters.")
-        session.run(tf.initialize_all_variables())
+    # Initialize variables (needed even when restoring because some variables are not restored : the state for example)
+    session.run(tf.initialize_all_variables())
     return model
 
 
