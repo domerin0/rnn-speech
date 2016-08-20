@@ -83,13 +83,14 @@ def createAcousticModel(session, hyper_params, batch_size, forward_only):
                           input_dim, forward_only=forward_only,
                           tensorboard_dir=hyper_params["tensorboard_dir"])
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
+    # Initialize variables
+    session.run(tf.initialize_all_variables())
+    # Restore from checkpoint (will overwrite variables)
     if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
         print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
         print("Created model with fresh parameters.")
-    # Initialize variables (needed even when restoring because some variables are not restored : the state for example)
-    session.run(tf.initialize_all_variables())
     return model
 
 

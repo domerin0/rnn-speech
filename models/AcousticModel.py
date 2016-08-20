@@ -104,7 +104,8 @@ class AcousticModel(object):
                   for i in tf.split(0, self.max_input_seq_length, self.inputs)]
 
         # set rnn init state to 0s
-        self.hidden_state = tf.Variable(cell.zero_state(self.batch_size, tf.float32), trainable=False)
+        self.hidden_state = tf.Variable(cell.zero_state(self.batch_size, tf.float32),
+                                        trainable=False, name="hidden_state")
 
         # build rnn
         with tf.name_scope('Dynamic_rnn'):
@@ -125,8 +126,8 @@ class AcousticModel(object):
         # compute prediction
         decoded, _ = ctc.ctc_greedy_decoder(self.logits, self.input_seq_lengths)
         self.prediction = tf.sparse_to_dense(decoded[0].indices, [self.batch_size, self.max_input_seq_length],
-                                        decoded[0].values, default_value=0, validate_indices=True,
-                                        name='Prediction')
+                                             decoded[0].values, default_value=0, validate_indices=True,
+                                             name='Prediction')
         self.prediction = tf.slice(self.prediction, [0, 0], [self.batch_size, self.max_target_seq_length])
 
         if not forward_only:
@@ -184,7 +185,10 @@ class AcousticModel(object):
         else:
             self.summary_writer = None
 
-        save_list = [self.learning_rate, self.global_step, w_i, b_i, w_o, b_o]
+        # We need to save all variables except for the hidden_state
+        # we keep it across batches but we don't need it across different runs
+        # Especially when we process a one time file
+        save_list = [var for var in tf.all_variables() if var.name.find('hidden_state') == -1]
         self.saver = tf.train.Saver(save_list)
 
     def getBatch(self, dataset, batch_pointer, is_train):
