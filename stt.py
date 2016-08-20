@@ -59,12 +59,10 @@ def process_file(audio_processor, hyper_params, file):
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
-        logit = model.process_input(sess, feat_vec, [original_feat_vec_length])
-        logit = logit.squeeze()
-        char_values = logit.argmax(axis=1)
+        prediction = model.process_input(sess, feat_vec, [original_feat_vec_length])
         transcribed_text = ""
         previous_char = ""
-        for i in char_values:
+        for i in prediction[0]:
             char = "abcdefghijklmnopqrstuvwxyz .'_-"[i]
             if char != previous_char:
                 transcribed_text += char

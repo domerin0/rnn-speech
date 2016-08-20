@@ -122,6 +122,13 @@ class AcousticModel(object):
         self.logits = tf.pack([tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
                                for i in tf.split(0, self.max_input_seq_length, rnn_output)])
 
+        # compute prediction
+        decoded, _ = ctc.ctc_greedy_decoder(self.logits, self.input_seq_lengths)
+        self.prediction = tf.sparse_to_dense(decoded[0].indices, [self.batch_size, self.max_input_seq_length],
+                                        decoded[0].values, default_value=0, validate_indices=True,
+                                        name='Prediction')
+        self.prediction = tf.slice(self.prediction, [0, 0], [self.batch_size, self.max_target_seq_length])
+
         if not forward_only:
             # graph sparse tensor inputs
             # We could take an int16 for less memory consumption but SparseTensor need an int64
@@ -160,14 +167,9 @@ class AcousticModel(object):
                     labels = tf.sparse_to_dense(self.target_indices, [self.batch_size, self.max_target_seq_length],
                                                 self.target_vals, default_value=0, validate_indices=True,
                                                 name='Labels')
-                    decoded, _ = ctc.ctc_greedy_decoder(self.logits, self.input_seq_lengths)
-                    prediction = tf.sparse_to_dense(decoded[0].indices, [self.batch_size, self.max_input_seq_length],
-                                                    decoded[0].values, default_value=0, validate_indices=True,
-                                                    name='Prediction')
-                    prediction = tf.slice(prediction, [0, 0], [self.batch_size, self.max_target_seq_length])
-                    tf.histogram_summary('Prediction', prediction, collections=[graphkey_test])
+                    tf.histogram_summary('Prediction', self.prediction, collections=[graphkey_test])
                     tf.histogram_summary('Labels', labels, collections=[graphkey_test])
-                    correct_prediction = tf.equal(tf.cast(prediction, tf.int32), labels)
+                    correct_prediction = tf.equal(tf.cast(self.prediction, tf.int32), labels)
                 with tf.name_scope('Accuracy'):
                     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
                 tf.scalar_summary('Accuracy (Training)', accuracy, collections=[graphkey_training])
@@ -299,7 +301,7 @@ class AcousticModel(object):
           Translated text
         """
         input_feed = {self.inputs.name: np.array(inputs), self.input_seq_lengths.name: np.array(input_seq_lengths)}
-        output_feed = [self.logits]
+        output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
 
