@@ -33,7 +33,7 @@ class AcousticModel(object):
     def __init__(self, session, num_labels, num_layers, hidden_size, dropout,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
                  max_input_seq_length, max_target_seq_length, input_dim,
-                 forward_only=False, tensorboard_dir=None):
+                 forward_only=False, tensorboard_dir=None, tb_run_name=None):
         """
         Acoustic rnn model, using ctc loss with lstm cells
         Inputs:
@@ -173,8 +173,11 @@ class AcousticModel(object):
         if self.tensorboard_dir is not None:
             self.train_summaries = tf.merge_all_summaries(key=graphkey_training)
             self.test_summaries = tf.merge_all_summaries(key=graphkey_test)
-            now = datetime.now().strftime('%Y-%m-%d--%H-%M-%S')
-            self.summary_writer = tf.train.SummaryWriter(tensorboard_dir + '/' + now + '/', graph=session.graph)
+            if tb_run_name is None:
+                run_name = datetime.now().strftime('%Y-%m-%d--%H-%M-%S')
+            else:
+                run_name = tb_run_name
+            self.summary_writer = tf.train.SummaryWriter(tensorboard_dir + '/' + run_name + '/', graph=session.graph)
         else:
             self.summary_writer = None
 
@@ -309,7 +312,7 @@ class AcousticModel(object):
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
 
-    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, async_get_batch):
+    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, async_get_batch, max_epoch=None):
         num_test_batches = self.getNumBatches(test_set)
 
         train_batch_pointer = 0
@@ -327,7 +330,8 @@ class AcousticModel(object):
         current_step = 0
         previous_loss = 0
         no_improvement_since = 0
-        while True:
+        running = True
+        while running:
             # begin timer
             start_time = time.time()
             if async_get_batch:
@@ -362,7 +366,12 @@ class AcousticModel(object):
             print("Step {0} with loss {1}".format(current_step, step_loss))
             step_time += (time.time() - start_time) / steps_per_checkpoint
             mean_loss += step_loss / steps_per_checkpoint
+
             current_step += 1
+            if (max_epoch is not None) and (current_step > max_epoch):
+                # We have reached the maximum allowed, we should exit at the end of this run
+                running = False
+
             if current_step % steps_per_checkpoint == 0:
                 print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
                       (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))

@@ -21,12 +21,12 @@ def main():
                                                     hyper_params["load_save_input_vec"])
 
     if prog_params['train'] is True:
-        train_rnn(hyper_params)
+        train_rnn(hyper_params, prog_params)
     else:
         process_file(audio_processor, hyper_params, prog_params['file'])
 
 
-def train_rnn(hyper_params):
+def train_rnn(hyper_params, prog_params):
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"],
                                                  hyper_params["training_dataset_type"])
     text_audio_pairs = data_processor.run()
@@ -38,12 +38,15 @@ def train_rnn(hyper_params):
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"], False)
+        model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"],
+                                    forward_only=False, tensorboard_dir=hyper_params["tensorboard_dir"],
+                                    tb_run_name=prog_params["tb_name"])
         print("Setting up audio processor...")
         model.initializeAudioProcessor(hyper_params["max_input_seq_length"], hyper_params["load_save_input_vec"])
         print("Start training...")
         model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
-                    hyper_params["checkpoint_dir"], hyper_params["async_get_batch"])
+                    hyper_params["checkpoint_dir"], hyper_params["async_get_batch"],
+                    max_epoch=prog_params["max_epoch"])
 
 
 def process_file(audio_processor, hyper_params, file):
@@ -55,7 +58,7 @@ def process_file(audio_processor, hyper_params, file):
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params, 1, True)
+        model = createAcousticModel(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None, tb_run_name=None)
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
@@ -71,7 +74,7 @@ def process_file(audio_processor, hyper_params, file):
         print(transcribed_text)
 
 
-def createAcousticModel(session, hyper_params, batch_size, forward_only):
+def createAcousticModel(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None, tb_run_name=None):
     num_labels = 31
     input_dim = 123
     model = AcousticModel(session, num_labels, hyper_params["num_layers"],
@@ -81,7 +84,7 @@ def createAcousticModel(session, hyper_params, batch_size, forward_only):
                           hyper_params["max_input_seq_length"],
                           hyper_params["max_target_seq_length"],
                           input_dim, forward_only=forward_only,
-                          tensorboard_dir=hyper_params["tensorboard_dir"])
+                          tensorboard_dir=tensorboard_dir, tb_run_name=tb_run_name)
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     # Initialize variables
     session.run(tf.initialize_all_variables())
@@ -104,6 +107,10 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default=DEFAULT_CONFIG_FILE,
                         help='Path to configuration file with hyper-parameters.')
+    parser.add_argument('--tb_name', type=str, default=None,
+                        help='Tensorboard path name for the run (allow multiples run with the same output path)')
+    parser.add_argument('--max_epoch', type=int, default=None,
+                        help='Max epoch to train (no limitation if not provided)')
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.set_defaults(train=False)
@@ -111,7 +118,8 @@ def parse_args():
     group.add_argument('--file', type=str, help='Path to a wav file to process')
 
     args = parser.parse_args()
-    prog_params = {'file': args.file, 'config_file': args.config, 'train': args.train}
+    prog_params = {'file': args.file, 'config_file': args.config, 'train': args.train, 'tb_name': args.tb_name,
+                   'max_epoch': args.max_epoch}
     return prog_params
 
 
