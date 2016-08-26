@@ -27,7 +27,6 @@ import time
 import sys
 import os
 from datetime import datetime
-from math import exp
 
 
 class AcousticModel(object):
@@ -98,8 +97,10 @@ class AcousticModel(object):
             cell = rnn_cell.MultiRNNCell([cell] * num_layers)
 
         # build input layer
-        w_i = tf.get_variable("input_w", [input_dim, hidden_size])
-        b_i = tf.get_variable("input_b", [hidden_size])
+        with tf.name_scope('Input_Layer'):
+            w_i = tf.Variable(tf.truncated_normal([input_dim, hidden_size], stddev=np.sqrt(2.0 / (2 * hidden_size))),
+                              name="input_w")
+            b_i = tf.Variable(tf.zeros([hidden_size]), name="input_b")
 
         # make rnn inputs
         inputs = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_i) + b_i
@@ -118,8 +119,9 @@ class AcousticModel(object):
 
         # build output layer
         with tf.name_scope('Output_layer'):
-            w_o = tf.get_variable("output_w", [hidden_size, num_labels])
-            b_o = tf.get_variable("output_b", [num_labels])
+            w_o = tf.Variable(tf.truncated_normal([hidden_size, num_labels], stddev=np.sqrt(2.0 / (2 * num_labels))),
+                              name="output_w")
+            b_o = tf.Variable(tf.zeros([num_labels]), name="output_b")
 
         # compute logits
         self.logits = tf.pack([tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
