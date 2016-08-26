@@ -27,16 +27,18 @@ import time
 import sys
 import os
 from datetime import datetime
+from math import exp
 
 
 class AcousticModel(object):
-    def __init__(self, num_labels, num_layers, hidden_size, dropout,
+    def __init__(self, session, num_labels, num_layers, hidden_size, dropout,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
                  max_input_seq_length, max_target_seq_length, input_dim,
                  forward_only=False, tensorboard_dir=None):
         """
         Acoustic rnn model, using ctc loss with lstm cells
         Inputs:
+        session - tensorflow session
         num_labels - dimension of character input/one hot encoding
         num_layers - number of lstm layers
         hidden_size - size of hidden layers
@@ -124,11 +126,7 @@ class AcousticModel(object):
                                for i in tf.split(0, self.max_input_seq_length, rnn_output)])
 
         # compute prediction
-        decoded, _ = ctc.ctc_greedy_decoder(self.logits, self.input_seq_lengths)
-        self.prediction = tf.sparse_to_dense(decoded[0].indices, [self.batch_size, self.max_input_seq_length],
-                                             decoded[0].values, default_value=0, validate_indices=True,
-                                             name='Prediction')
-        self.prediction = tf.slice(self.prediction, [0, 0], [self.batch_size, self.max_target_seq_length])
+        self.prediction = tf.to_int32(ctc.ctc_beam_search_decoder(self.logits, self.input_seq_lengths)[0][0])
 
         if not forward_only:
             # graph sparse tensor inputs
@@ -155,7 +153,7 @@ class AcousticModel(object):
             tf.scalar_summary('Mean loss (Test)', self.mean_loss, collections=[graphkey_test])
             params = tf.trainable_variables()
 
-            opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+            opt = tf.train.AdamOptimizer(self.learning_rate)
             gradients = tf.gradients(self.ctc_loss, params)
             clipped_gradients, norm = tf.clip_by_global_norm(gradients,
                                                              grad_clip)
@@ -164,24 +162,17 @@ class AcousticModel(object):
 
             # Accuracy
             with tf.name_scope('Accuracy'):
-                with tf.name_scope('Correct_prediction'):
-                    labels = tf.sparse_to_dense(self.target_indices, [self.batch_size, self.max_target_seq_length],
-                                                self.target_vals, default_value=0, validate_indices=True,
-                                                name='Labels')
-                    tf.histogram_summary('Prediction', self.prediction, collections=[graphkey_test])
-                    tf.histogram_summary('Labels', labels, collections=[graphkey_test])
-                    correct_prediction = tf.equal(tf.cast(self.prediction, tf.int32), labels)
-                with tf.name_scope('Accuracy'):
-                    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-                tf.scalar_summary('Accuracy (Training)', accuracy, collections=[graphkey_training])
-                tf.scalar_summary('Accuracy (Test)', accuracy, collections=[graphkey_test])
+                errorRate = tf.reduce_sum(tf.edit_distance(self.prediction, sparse_labels, normalize=False)) / \
+                           tf.to_float(tf.size(sparse_labels.values))
+                tf.scalar_summary('Error Rate (Training)', errorRate, collections=[graphkey_training])
+                tf.scalar_summary('Error Rate (Test)', errorRate, collections=[graphkey_test])
 
         # TensorBoard init
         if self.tensorboard_dir is not None:
             self.train_summaries = tf.merge_all_summaries(key=graphkey_training)
             self.test_summaries = tf.merge_all_summaries(key=graphkey_test)
             now = datetime.now().strftime('%Y-%m-%d--%H-%M-%S')
-            self.summary_writer = tf.train.SummaryWriter(tensorboard_dir + '/' + now + '/')
+            self.summary_writer = tf.train.SummaryWriter(tensorboard_dir + '/' + now + '/', graph=session.graph)
         else:
             self.summary_writer = None
 
@@ -201,7 +192,6 @@ class AcousticModel(object):
           input_feat_vecs, input_feat_vec_lengths, target_lengths,
             target_labels, target_indices
         """
-        initial_batch_pointer = batch_pointer
         input_feat_vecs = []
         input_feat_vec_lengths = []
         target_lengths = []
@@ -214,13 +204,17 @@ class AcousticModel(object):
             batch_pointer += 1
             if batch_pointer == dataset.__len__():
                 batch_pointer = 0
-            assert batch_pointer != initial_batch_pointer
 
             # Process the audio file to get the input
             feat_vec, original_feat_vec_length = self.audio_processor.processFLACAudio(file_text[0])
             # Process the label to get the output
-            labels = self.getStrLabels(file_text[1])
             # Labels len does not need to be always the same as for input, don't need padding
+            try:
+                labels = self.getStrLabels(file_text[1])
+            except:
+                # Incorrect label
+                print("Incorrect label for {0} ({1})".format(file_text[0], file_text[1]))
+                continue
 
             # Check sizes
             if (len(labels) > self.max_target_seq_length) or (original_feat_vec_length > self.max_input_seq_length):
@@ -266,6 +260,10 @@ class AcousticModel(object):
     @staticmethod
     def getStrLabels(_str):
         allowed_chars = "abcdefghijklmnopqrstuvwxyz .'-_"
+        # Remove punctuation
+        _str = _str.replace(".", "")
+        _str = _str.replace("?", "")
+        _str = _str.replace("'", "")
         # add eos char
         _str += "_"
         return [allowed_chars.index(char) for char in _str]
@@ -352,6 +350,9 @@ class AcousticModel(object):
                 if no_improvement_since == 6:
                     sess.run(self.learning_rate_decay_op)
                     no_improvement_since = 0
+                    if self.learning_rate.eval() < 1e-7:
+                        # End learning process
+                        break
             else:
                 no_improvement_since = 0
             previous_loss = step_loss
@@ -368,33 +369,34 @@ class AcousticModel(object):
                 self.saver.save(sess, checkpoint_path, global_step=self.global_step)
                 step_time, mean_loss = 0.0, 0.0
 
-                if async_get_batch:
-                    # begin loading test data async
-                    # (uses different pipline than train data)
-                    async_test_loader = Process(
-                        target=self.getBatch,
-                        args=(test_set, test_batch_pointer, False))
-                    async_test_loader.start()
-
-                print(num_test_batches)
-                for i in range(num_test_batches):
-                    print("On {0}th training iteration".format(i))
+                if num_test_batches > 0:
                     if async_get_batch:
-                        eval_inputs = parent_test_conn.recv()
-                        # tell audio processor to go get another batch ready
-                        # while we run last one through the graph
-                        if i != num_test_batches - 1:
-                            async_test_loader = Process(
-                                target=self.getBatch,
-                                args=(test_set, test_batch_pointer, False))
-                            async_test_loader.start()
-                    else:
-                        eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
+                        # begin loading test data async
+                        # (uses different pipline than train data)
+                        async_test_loader = Process(
+                            target=self.getBatch,
+                            args=(test_set, test_batch_pointer, False))
+                        async_test_loader.start()
 
-                    test_batch_pointer = eval_inputs[5]
+                    print(num_test_batches)
+                    for i in range(num_test_batches):
+                        print("On {0}th training iteration".format(i))
+                        if async_get_batch:
+                            eval_inputs = parent_test_conn.recv()
+                            # tell audio processor to go get another batch ready
+                            # while we run last one through the graph
+                            if i != num_test_batches - 1:
+                                async_test_loader = Process(
+                                    target=self.getBatch,
+                                    args=(test_set, test_batch_pointer, False))
+                                async_test_loader.start()
+                        else:
+                            eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
 
-                    _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
-                                             eval_inputs[2], eval_inputs[3],
-                                             eval_inputs[4], forward_only=True)
-                print("\tTest: loss %.2f" % step_loss)
-                sys.stdout.flush()
+                        test_batch_pointer = eval_inputs[5]
+
+                        _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
+                                                 eval_inputs[2], eval_inputs[3],
+                                                 eval_inputs[4], forward_only=True)
+                    print("\tTest: loss %.2f" % step_loss)
+                    sys.stdout.flush()

@@ -30,7 +30,7 @@ def train_rnn(hyper_params):
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"],
                                                  hyper_params["training_dataset_type"])
     text_audio_pairs = data_processor.run()
-    num_train = int(floor(hyper_params["train_frac"] * len(text_audio_pairs)))
+    num_train = max(1, int(floor(hyper_params["train_frac"] * len(text_audio_pairs))))
     train_set = text_audio_pairs[:num_train]
     test_set = text_audio_pairs[num_train:]
     print("Using {0} size of test set".format(len(test_set)))
@@ -62,8 +62,8 @@ def process_file(audio_processor, hyper_params, file):
         prediction = model.process_input(sess, feat_vec, [original_feat_vec_length])
         transcribed_text = ""
         previous_char = ""
-        for i in prediction[0]:
-            char = "abcdefghijklmnopqrstuvwxyz .'_-"[i]
+        for i in prediction.values:
+            char = "abcdefghijklmnopqrstuvwxyz .'-_"[i]
             if char != previous_char:
                 transcribed_text += char
             previous_char = char
@@ -74,7 +74,7 @@ def process_file(audio_processor, hyper_params, file):
 def createAcousticModel(session, hyper_params, batch_size, forward_only):
     num_labels = 31
     input_dim = 123
-    model = AcousticModel(num_labels, hyper_params["num_layers"],
+    model = AcousticModel(session, num_labels, hyper_params["num_layers"],
                           hyper_params["hidden_size"], hyper_params["dropout"],
                           batch_size, hyper_params["learning_rate"],
                           hyper_params["lr_decay_factor"], hyper_params["grad_clip"],
