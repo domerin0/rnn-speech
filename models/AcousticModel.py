@@ -87,11 +87,14 @@ class AcousticModel(object):
                                                  shape=[None],
                                                  name="target_seq_lengths")
 
-        # define cells of acoustic model
-        cell = rnn_cell.DropoutWrapper(
-            rnn_cell.BasicLSTMCell(hidden_size),
-            input_keep_prob=self.dropout_keep_prob_lstm_input,
-            output_keep_prob=self.dropout_keep_prob_lstm_output)
+        if forward_only:
+            # Define cells of acoustic model
+            cell = rnn_cell.BasicLSTMCell(hidden_size)
+        else:
+            # If we are in training then add a dropoutWrapper to the cells
+            cell = rnn_cell.DropoutWrapper(rnn_cell.BasicLSTMCell(hidden_size),
+                                           input_keep_prob=self.dropout_keep_prob_lstm_input,
+                                           output_keep_prob=self.dropout_keep_prob_lstm_output)
 
         if num_layers > 1:
             cell = rnn_cell.MultiRNNCell([cell] * num_layers)
