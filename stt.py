@@ -27,12 +27,25 @@ def main():
 
 
 def train_rnn(hyper_params, prog_params):
+    # Load the train set data
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"],
                                                  hyper_params["training_dataset_type"])
-    text_audio_pairs = data_processor.run()
-    num_train = max(1, int(floor(hyper_params["train_frac"] * len(text_audio_pairs))))
-    train_set = text_audio_pairs[:num_train]
-    test_set = text_audio_pairs[num_train:]
+    train_set = data_processor.run()
+    if (hyper_params["test_dataset_dir"] is not None) and (hyper_params["test_dataset_type"] is not None):
+        # Load the test set data
+        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dir"],
+                                                     hyper_params["test_dataset_type"])
+        test_set = data_processor.run()
+    elif hyper_params["train_frac"] is not None:
+        # Or use a fraction of the train set for the test set
+        num_train = max(1, int(floor(hyper_params["train_frac"] * len(train_set))))
+        test_set = train_set[num_train:]
+        train_set = train_set[:num_train]
+    else:
+        # Or use no test set
+        test_set = []
+
+    print("Using {0} files in train set".format(len(train_set)))
     print("Using {0} size of test set".format(len(test_set)))
 
     with tf.Session() as sess:

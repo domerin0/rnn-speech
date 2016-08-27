@@ -15,27 +15,29 @@ try:
 except ImportError:
     import configparser
 
+
 class DataProcessor(object):
     def __init__(self, raw_data_path, data_type):
         self.raw_data_path = raw_data_path
         self.data_type = data_type
 
     def run(self):
-        print("Figuring out which files need to be processed...")
         if self.data_type == "Shtooka":
             audio_file_text_pairs, will_convert = self.getFileNameTextPairs_Shtooka(self.raw_data_path)
         elif self.data_type == "LibriSpeech":
             data_dirs = self.checkWhichDataFoldersArePresent()
             # Check which data folders are present
             if len(data_dirs) == 0:
-                print("Something went wrong, no data detected, check data directory..")
-                return
+                raise Exception("ERROR : something went wrong, no data detected, check data directory.")
             # Get pairs of (audio_file_name, transcribed_text)
             audio_file_text_pairs, will_convert = self.getFileNameTextPairs_LibriSpeech(data_dirs)
         else:
-            raise Exception("unknown training_dataset_type")
+            raise Exception("ERROR : unknown training_dataset_type")
 
-        print("Using {0} files in total dataset...".format(len(audio_file_text_pairs)))
+        # Check that there is data
+        if len(audio_file_text_pairs) == 0:
+            raise Exception("ERROR : no data found in directory {0}".format(self.raw_data_path))
+
         # Shuffle pairs
         shuffle(audio_file_text_pairs)
 
@@ -55,11 +57,11 @@ class DataProcessor(object):
         return audio_file_text_pairs_final
 
     def getFileNameTextPairs_LibriSpeech(self, data_dirs):
-        '''
+        """
         Returns
           a list of tuples (audio_file_name, transcribed_text)
           a boolean if some files need to be converted to wav
-        '''
+        """
         audio_file_text_pairs = []
         # Assume there will not need any conversion
         will_convert = False
@@ -125,4 +127,3 @@ class DataProcessor(object):
                         audio_file_text_pairs.append([audio_file.replace(".flac", ".wav"),
                                                       config[section]['SWAC_TEXT'].strip().lower().replace("_", "-")])
         return audio_file_text_pairs, len(flac_audio_files) > 0
-
