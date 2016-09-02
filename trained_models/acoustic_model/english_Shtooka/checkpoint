@@ -1,0 +1,2 @@
+model_checkpoint_path: "acousticmodel.ckpt"
+all_model_checkpoint_paths: "acousticmodel.ckpt"
