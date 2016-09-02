@@ -54,6 +54,11 @@ def train_rnn(hyper_params, prog_params):
         model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"],
                                     forward_only=False, tensorboard_dir=hyper_params["tensorboard_dir"],
                                     tb_run_name=prog_params["tb_name"])
+        # Override the learning rate if given on the command line
+        if prog_params["learn_rate"] is not None:
+            assign_op = model.learning_rate.assign(prog_params["learn_rate"])
+            sess.run(assign_op)
+
         print("Setting up audio processor...")
         model.initializeAudioProcessor(hyper_params["max_input_seq_length"], hyper_params["load_save_input_vec"])
         print("Start training...")
@@ -124,6 +129,8 @@ def parse_args():
                         help='Tensorboard path name for the run (allow multiples run with the same output path)')
     parser.add_argument('--max_epoch', type=int, default=None,
                         help='Max epoch to train (no limitation if not provided)')
+    parser.add_argument('--learn_rate', type=float, default=None,
+                        help='Force learning rate to start from this value (overriding checkpoint value)')
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.set_defaults(train=False)
@@ -132,7 +139,7 @@ def parse_args():
 
     args = parser.parse_args()
     prog_params = {'file': args.file, 'config_file': args.config, 'train': args.train, 'tb_name': args.tb_name,
-                   'max_epoch': args.max_epoch}
+                   'max_epoch': args.max_epoch, 'learn_rate': args.learn_rate}
     return prog_params
 
 
