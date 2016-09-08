@@ -24,6 +24,8 @@ class DataProcessor(object):
     def run(self):
         if self.data_type == "Shtooka":
             audio_file_text_pairs, will_convert = self.getFileNameTextPairs_Shtooka(self.raw_data_path)
+        elif self.data_type == "LREC2014":
+            audio_file_text_pairs, will_convert = self.getFileNameTextPairs_LREC2014(self.raw_data_path)
         elif self.data_type == "LibriSpeech":
             data_dirs = self.checkWhichDataFoldersArePresent()
             # Check which data folders are present
@@ -127,3 +129,14 @@ class DataProcessor(object):
                         audio_file_text_pairs.append([audio_file.replace(".flac", ".wav"),
                                                       config[section]['SWAC_TEXT'].strip().lower().replace("_", "-")])
         return audio_file_text_pairs, len(flac_audio_files) > 0
+
+    def getFileNameTextPairs_LREC2014(self, raw_data_path):
+        _, wav_audio_files, _ = self.findFiles(raw_data_path)
+        # Build from index_tags
+        audio_file_text_pairs = []
+        for file in wav_audio_files:
+            if os.path.exists(file + ".trn"):
+                with open(file + ".trn", "r") as f:
+                    words = f.readline()
+                    audio_file_text_pairs.append([file, words.strip().lower().replace("_", "-")])
+        return audio_file_text_pairs, False
