@@ -73,14 +73,12 @@ class HyperParameterHandler(object):
             old_params = self.getParams()
             return old_params["num_layers"] != new_params["num_layers"] or\
                 old_params["hidden_size"] != new_params["hidden_size"] or\
-                old_params["dropout"] != new_params["dropout"] or\
-                old_params["max_input_seq_length"] != new_params["max_input_seq_length"] or\
-                old_params["max_target_seq_length"] != new_params["max_target_seq_length"]or\
-                old_params["batch_size"] != new_params["batch_size"]
+                old_params["dropout"] != new_params["dropout"]
         else:
             return False
 
-    def readConfigFile(self, config_file):
+    @staticmethod
+    def readConfigFile(config_file):
         """
         Reads in config file, returns dictionary of network params
         """
@@ -114,8 +112,7 @@ class HyperParameterHandler(object):
         if dic["tensorboard_dir"] is not None and not os.path.exists(dic["tensorboard_dir"]):
             dic["tensorboard_dir"] = None
 
-
-        if dic["load_save_input_vec"] == True and dic["async_get_batch"] == True:
+        if dic["load_save_input_vec"] is True and dic["async_get_batch"] is True:
             raise Exception("load_save_input_vec and async_get_batch cannot be activated simultaneously")
 
         return dic
