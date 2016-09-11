@@ -87,17 +87,15 @@ class AcousticModel(object):
                                                  shape=[None],
                                                  name="target_seq_lengths")
 
-        if forward_only:
-            # Define cells of acoustic model
-            cell = rnn_cell.BasicLSTMCell(hidden_size)
-        else:
+        # Define cells of acoustic model
+        cell = rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
+        if not forward_only:
             # If we are in training then add a dropoutWrapper to the cells
-            cell = rnn_cell.DropoutWrapper(rnn_cell.BasicLSTMCell(hidden_size),
-                                           input_keep_prob=self.dropout_keep_prob_lstm_input,
+            cell = rnn_cell.DropoutWrapper(cell, input_keep_prob=self.dropout_keep_prob_lstm_input,
                                            output_keep_prob=self.dropout_keep_prob_lstm_output)
 
         if num_layers > 1:
-            cell = rnn_cell.MultiRNNCell([cell] * num_layers)
+            cell = rnn_cell.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
 
         # build input layer
         with tf.name_scope('Input_Layer'):
@@ -110,14 +108,13 @@ class AcousticModel(object):
                   for i in tf.split(0, self.max_input_seq_length, self.inputs)]
 
         # set rnn init state to 0s
-        self.hidden_state = tf.Variable(cell.zero_state(self.batch_size, tf.float32),
-                                        trainable=False, name="hidden_state")
+        init_state = cell.zero_state(self.batch_size, tf.float32)
 
         # build rnn
         with tf.name_scope('Dynamic_rnn'):
             rnn_output, self.hidden_state = rnn.dynamic_rnn(cell, tf.pack(inputs),
                                                             sequence_length=self.input_seq_lengths,
-                                                            initial_state=self.hidden_state,
+                                                            initial_state=init_state,
                                                             time_major=True, parallel_iterations=1000)
 
         # build output layer
