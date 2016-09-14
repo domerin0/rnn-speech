@@ -9,7 +9,6 @@ Curently it will only work for one specific dataset.
 """
 import os
 from random import shuffle
-import util.audioprocessor as audioprocessor
 try:
     import ConfigParser as configparser
 except ImportError:
@@ -17,15 +16,18 @@ except ImportError:
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_path, data_type):
+    def __init__(self, raw_data_path, data_type, audio_processor):
         self.raw_data_path = raw_data_path
         self.data_type = data_type
+        self.audio_processor = audio_processor
 
     def run(self):
         if self.data_type == "Shtooka":
             audio_file_text_pairs, will_convert = self.getFileNameTextPairs_Shtooka(self.raw_data_path)
         elif self.data_type == "Vystadial_2013":
             audio_file_text_pairs, will_convert = self.getFileNameTextPairs_Vystadial_2013(self.raw_data_path)
+        elif self.data_type == "TEDLIUM":
+            audio_file_text_pairs, will_convert = self.getFileNameTextPairs_TEDLIUM(self.raw_data_path)
         elif self.data_type == "LibriSpeech":
             data_dirs = self.checkWhichDataFoldersArePresent()
             # Check which data folders are present
@@ -45,10 +47,9 @@ class DataProcessor(object):
 
         if will_convert:
             audio_file_text_pairs_final = []
-            audio_processor = audioprocessor.AudioProcessor(1)
             for audio_file_name in audio_file_text_pairs:
                 if audio_file_name[0].endswith(".flac"):
-                    audio_processor.convertAndDeleteFLAC(audio_file_name[0])
+                    self.audio_processor.convertAndDeleteFLAC(audio_file_name[0])
                     audio_file_text_pairs_final.append((audio_file_name[0].replace(".flac", ".wav"),
                                                         audio_file_name[1]))
                 else:
@@ -100,7 +101,7 @@ class DataProcessor(object):
         return dirs_allowed
 
     @staticmethod
-    def findFiles(root_search_path):
+    def findFiles(root_search_path, extension=".txt"):
         flac_audio_files, wav_audio_files, text_files = [], [], []
         for root, _, files in os.walk(root_search_path):
             flac_audio_files.extend([os.path.join(root, audio_file)
@@ -108,7 +109,7 @@ class DataProcessor(object):
             wav_audio_files.extend([os.path.join(root, audio_file)
                                    for audio_file in files if audio_file.endswith(".wav")])
             text_files.extend([os.path.join(root, text_file)
-                              for text_file in files if text_file.endswith(".txt")])
+                              for text_file in files if text_file.endswith(extension)])
         return flac_audio_files, wav_audio_files, text_files
 
     def getFileNameTextPairs_Shtooka(self, raw_data_path):
@@ -140,3 +141,37 @@ class DataProcessor(object):
                     words = f.readline()
                     audio_file_text_pairs.append([file, words.strip().lower().replace("_", "-")])
         return audio_file_text_pairs, False
+
+
+    def getFileNameTextPairs_TEDLIUM(self, raw_data_path):
+        _, _, stm_files = self.findFiles(raw_data_path, extension=".stm")
+        # Build from index_tags
+        audio_file_text_pairs = []
+        for file in stm_files:
+            with open(file, "r") as f:
+                lines = f.read().split("\n")
+                for line in lines:
+                    if line == "":
+                        continue
+                    line_list = line.split(' ', maxsplit=6)
+                    if (line_list[2] != "inter_segment_gap") and (line_list[6] != "ignore_time_segment_in_scoring"):
+                        start = line_list[3]
+                        end = line_list[4]
+                        directory = os.path.split(file)[0]
+                        sph_file = directory + "/../sph/{0}.sph".format(line_list[0])
+                        wav_file = directory + "/../sph/{0}_{1}.wav".format(line_list[0], start)
+                        if not os.path.exists(wav_file):
+                            self.audio_processor.extractWavFromSph(sph_file, wav_file, start, end)
+                        audio_file_text_pairs.append([wav_file, line_list[6].strip().lower().replace("_", "-")])
+        return audio_file_text_pairs, False
+
+    def filterDataset(self, audio_file_text_pairs, max_input_seq_length, max_target_seq_length):
+        new_audio_file_text_pairs = []
+        for [file, text] in audio_file_text_pairs:
+            if len(text) > max_target_seq_length:
+                continue
+            _, original_feat_vec_length = self.audio_processor.processFLACAudio(file)
+            if original_feat_vec_length > max_input_seq_length:
+                continue
+            new_audio_file_text_pairs.append([file, text])
+        return new_audio_file_text_pairs

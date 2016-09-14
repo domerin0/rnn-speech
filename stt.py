@@ -21,20 +21,22 @@ def main():
                                                     hyper_params["load_save_input_vec"])
 
     if prog_params['train'] is True:
-        train_rnn(hyper_params, prog_params)
+        train_rnn(audio_processor, hyper_params, prog_params)
     else:
         process_file(audio_processor, hyper_params, prog_params['file'])
 
 
-def train_rnn(hyper_params, prog_params):
+def train_rnn(audio_processor, hyper_params, prog_params):
     # Load the train set data
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"],
-                                                 hyper_params["training_dataset_type"])
+                                                 hyper_params["training_dataset_type"],
+                                                 audio_processor)
     train_set = data_processor.run()
     if (hyper_params["test_dataset_dir"] is not None) and (hyper_params["test_dataset_type"] is not None):
         # Load the test set data
         data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dir"],
-                                                     hyper_params["test_dataset_type"])
+                                                     hyper_params["test_dataset_type"],
+                                                     audio_processor)
         test_set = data_processor.run()
     elif hyper_params["train_frac"] is not None:
         # Or use a fraction of the train set for the test set
@@ -44,6 +46,12 @@ def train_rnn(hyper_params, prog_params):
     else:
         # Or use no test set
         test_set = []
+
+    if hyper_params["pre_filter_file_size"] is True:
+        test_set = data_processor.filterDataset(test_set, hyper_params["max_input_seq_length"],
+                                                hyper_params["max_target_seq_length"])
+        train_set = data_processor.filterDataset(train_set, hyper_params["max_input_seq_length"],
+                                                 hyper_params["max_target_seq_length"])
 
     print("Using {0} files in train set".format(len(train_set)))
     print("Using {0} size of test set".format(len(test_set)))

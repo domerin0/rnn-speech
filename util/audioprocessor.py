@@ -1,11 +1,11 @@
-'''
+"""
 a 40-dimensional log mel-frequency
 filterbank feature vector with energy and their delta and double-delta
 values
 
 The feature vectors
 are extracted every 10 ms with 25 ms Hamming window
-'''
+"""
 from python_speech_features import fbank
 import scipy.io.wavfile as wav
 import numpy as np
@@ -19,10 +19,10 @@ class AudioProcessor(object):
         self.load_save_input_vec = load_save_input_vec
 
     def processFLACAudio(self, wav_file_name):
-        '''
+        """
         Reads in audio file, processes it
         Returns padded feature tensor and unpadded length
-        '''
+        """
         # Check if computed input vector already exists
         if self.load_save_input_vec and os.path.exists(wav_file_name.replace(".wav", ".h5")):
             with h5py.File(wav_file_name.replace(".wav", ".h5"), 'r') as hf:
@@ -54,10 +54,10 @@ class AudioProcessor(object):
         self.deleteWav(audio_file_name)
 
     def computeLogMelFilterBank(self, file_name):
-        '''
+        """
         Compute the log-mel frequency filterbank feature vector with deltas and
         double deltas
-        '''
+        """
         (rate, sig) = wav.read(file_name)
         fbank_feat, energy = fbank(sig, rate, winlen=0.025, winstep=0.01, nfilt=40)
         fbank_feat = np.log(fbank_feat)
@@ -71,11 +71,12 @@ class AudioProcessor(object):
         assert len(feat_vec[0]) == 123, "Something wrong with feature vector dimensions..."
         return feat_vec
 
-    def computeDeltas(self, fbank_frames, N=2):
-        '''
+    @staticmethod
+    def computeDeltas(fbank_frames, N=2):
+        """
         Implementation of this based on formula found at:
         http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/
-        '''
+        """
         frames = []
         for i, feat_vec in enumerate(fbank_frames):
             deltas = []
@@ -94,17 +95,24 @@ class AudioProcessor(object):
                 frames.append(deltas)
         return np.array(frames)
 
-    def convertFlac2Wav(self, file_name):
-        '''
+    @staticmethod
+    def convertFlac2Wav(file_name):
+        """
         Convert the flac file to wav (so we can process on it)
-        '''
+        """
         os.system("sox {0} {1}".format(file_name,
                   file_name.replace(".flac", ".wav")))
         return file_name.replace(".flac", ".wav")
 
-    def deleteWav(self, file_name):
-        '''
+    @staticmethod
+    def deleteWav(file_name):
+        """
         Delete wav file after we're done with it
-        '''
+        """
         if file_name.endswith(".flac"):
             os.remove(file_name)
+
+    def extractWavFromSph(self, sph_file, wav_file, start, end):
+        os.system("sox {0} {1} trim {2} ={3}".format(sph_file, wav_file, start, end))
+        return
+
