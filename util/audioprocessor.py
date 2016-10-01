@@ -1,3 +1,4 @@
+# coding=utf-8
 """
 a 40-dimensional log mel-frequency
 filterbank feature vector with energy and their delta and double-delta
@@ -10,6 +11,7 @@ from python_speech_features import fbank
 import scipy.io.wavfile as wav
 import numpy as np
 import os
+import subprocess
 import h5py
 
 
@@ -26,8 +28,12 @@ class AudioProcessor(object):
         # Check if computed input vector already exists
         if self.load_save_input_vec and os.path.exists(wav_file_name.replace(".wav", ".h5")):
             with h5py.File(wav_file_name.replace(".wav", ".h5"), 'r') as hf:
-                feat_vec = hf['feat_vec'].value
-                original_feat_vec_length = hf['original_feat_vec_length'].value
+                try:
+                    feat_vec = hf['feat_vec'].value
+                    original_feat_vec_length = hf['original_feat_vec_length'].value
+                except:
+                    print("Error loading file : ", wav_file_name.replace(".wav", ".h5"))
+                    return [], 0
         else:
             feat_vec = self.computeLogMelFilterBank(wav_file_name)
             original_feat_vec_length = len(feat_vec)
@@ -100,8 +106,10 @@ class AudioProcessor(object):
         """
         Convert the flac file to wav (so we can process on it)
         """
-        os.system("sox {0} {1}".format(file_name,
-                  file_name.replace(".flac", ".wav")))
+        try:
+            subprocess.call("sox {0} {1}".format(file_name, file_name.replace(".flac", ".wav")))
+        except OSError as e:
+            print("Execution failed:", e)
         return file_name.replace(".flac", ".wav")
 
     @staticmethod
@@ -112,7 +120,12 @@ class AudioProcessor(object):
         if file_name.endswith(".flac"):
             os.remove(file_name)
 
-    def extractWavFromSph(self, sph_file, wav_file, start, end):
-        os.system("sox {0} {1} trim {2} ={3}".format(sph_file, wav_file, start, end))
-        return
+    @staticmethod
+    def extractWavFromSph(sph_file, wav_file, start, end):
+        try:
+            subprocess.call("sox {0} {1} trim {2} ={3}".format(sph_file, wav_file, start, end))
+        except OSError as e:
+            print("Execution failed:", e)
+            return False
+        return True
 

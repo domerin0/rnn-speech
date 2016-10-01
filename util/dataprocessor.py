@@ -160,9 +160,11 @@ class DataProcessor(object):
                         directory = os.path.split(file)[0]
                         sph_file = directory + "/../sph/{0}.sph".format(line_list[0])
                         wav_file = directory + "/../sph/{0}_{1}.wav".format(line_list[0], start)
-                        if not os.path.exists(wav_file):
-                            self.audio_processor.extractWavFromSph(sph_file, wav_file, start, end)
-                        audio_file_text_pairs.append([wav_file, line_list[6].strip().lower().replace("_", "-")])
+                        extract_result = None
+                        if (not os.path.exists(wav_file)) and (not os.path.exists(wav_file).replace(".wav", ".h5")):
+                            extract_result = self.audio_processor.extractWavFromSph(sph_file, wav_file, start, end)
+                        if extract_result is not False:
+                            audio_file_text_pairs.append([wav_file, line_list[6].strip().lower().replace("_", "-")])
         return audio_file_text_pairs, False
 
     def filterDataset(self, audio_file_text_pairs, max_input_seq_length, max_target_seq_length):

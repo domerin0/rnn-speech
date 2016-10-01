@@ -267,8 +267,11 @@ class AcousticModel(object):
         allowed_chars = "abcdefghijklmnopqrstuvwxyz .'-_"
         # Remove punctuation
         _str = _str.replace(".", "")
+        _str = _str.replace(",", "")
         _str = _str.replace("?", "")
         _str = _str.replace("'", "")
+        _str = _str.replace("!", "")
+        _str = _str.replace(":", "")
         # add eos char
         _str += "_"
         return [allowed_chars.index(char) for char in _str]
