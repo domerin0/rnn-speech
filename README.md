@@ -18,6 +18,7 @@ The datasets currently supported are :
 * [LibriSpeech](http://www.openslr.org/12/) by Vassil Panayotov
 * [Shtooka](http://shtooka.net/)
 * [Vystadial 2013](http://hdl.handle.net/11858/00-097C-0000-0023-4670-6)
+* [TED-LIUM](http://www-lium.univ-lemans.fr/en/content/ted-lium-corpus)
 
 The data is fed through two pipelines, one for testing, and the other for training. This can be done asynchronously or the resulting input vector can also be saved to avoid re-processing.
 
@@ -87,9 +88,25 @@ MIT
 
 
 ###References
+#### LibriSpeech
+````
+"LibriSpeech: an ASR corpus based on public domain audio books", Vassil Panayotov, Guoguo Chen, Daniel Povey and Sanjeev Khudanpur, ICASSP 2015
+````
+
+#### Shtooka
+````
+http://shtooka.net
+````
+
 ####Vystadial 2013
 ````
 Korvas, Matěj; Plátek, Ondřej; Dušek, Ondřej; Žilka, Lukáš and Jurčíček, Filip, 2014, Vystadial 2013 – Czech data,
 LINDAT/CLARIN digital library at Institute of Formal and Applied Linguistics, Charles University in Prague,
 http://hdl.handle.net/11858/00-097C-0000-0023-4670-6.
+````
+
+#### TED-LIUM Corpus
+````
+A. Rousseau, P. Deléglise, and Y. Estève, "Enhancing the TED-LIUM Corpus with Selected Data for Language Modeling and More TED Talks",
+in Proceedings of the Ninth International Conference on Language Resources and Evaluation (LREC’14), May 2014.
 ````

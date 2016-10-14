@@ -27,6 +27,7 @@ import time
 import sys
 import os
 from datetime import datetime
+from random import shuffle
 
 
 class AcousticModel(object):
@@ -315,11 +316,51 @@ class AcousticModel(object):
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
 
-    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, async_get_batch, max_epoch=None):
+    def run_checkpoint(self, sess, checkpoint_dir, test_set, parent_test_conn=None):
         num_test_batches = self.getNumBatches(test_set)
-
-        train_batch_pointer = 0
         test_batch_pointer = 0
+
+        # Save the model
+        checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
+        self.saver.save(sess, checkpoint_path, global_step=self.global_step)
+
+        # Run a test set against the current model
+        if num_test_batches > 0:
+            if parent_test_conn is not None:
+                # begin loading test data async
+                # (uses different pipline than train data)
+                async_test_loader = Process(
+                    target=self.getBatch,
+                    args=(test_set, test_batch_pointer, False))
+                async_test_loader.start()
+
+            print(num_test_batches)
+            for i in range(num_test_batches):
+                print("On {0}th training iteration".format(i))
+                if parent_test_conn is not None:
+                    eval_inputs = parent_test_conn.recv()
+                    # tell audio processor to go get another batch ready
+                    # while we run last one through the graph
+                    if i != num_test_batches - 1:
+                        async_test_loader = Process(
+                            target=self.getBatch,
+                            args=(test_set, test_batch_pointer, False))
+                        async_test_loader.start()
+                else:
+                    eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
+
+                test_batch_pointer = eval_inputs[5]
+
+                _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
+                                         eval_inputs[2], eval_inputs[3],
+                                         eval_inputs[4], forward_only=True)
+            print("\tTest: loss %.2f" % step_loss)
+            sys.stdout.flush()
+
+    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, async_get_batch, max_epoch=None):
+        num_train_batches = self.getNumBatches(train_set)
+        train_batch_pointer = 0
+        parent_test_conn = parent_train_conn = None
 
         if async_get_batch:
             print("Setting up piplines to test and train data...")
@@ -375,42 +416,14 @@ class AcousticModel(object):
                 # We have reached the maximum allowed, we should exit at the end of this run
                 running = False
 
+            # Check if we are at a checkpoint
             if current_step % steps_per_checkpoint == 0:
                 print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
                       (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))
-
-                checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
-                self.saver.save(sess, checkpoint_path, global_step=self.global_step)
+                self.run_checkpoint(sess, checkpoint_dir, test_set, parent_test_conn)
                 step_time, mean_loss = 0.0, 0.0
 
-                if num_test_batches > 0:
-                    if async_get_batch:
-                        # begin loading test data async
-                        # (uses different pipline than train data)
-                        async_test_loader = Process(
-                            target=self.getBatch,
-                            args=(test_set, test_batch_pointer, False))
-                        async_test_loader.start()
-
-                    print(num_test_batches)
-                    for i in range(num_test_batches):
-                        print("On {0}th training iteration".format(i))
-                        if async_get_batch:
-                            eval_inputs = parent_test_conn.recv()
-                            # tell audio processor to go get another batch ready
-                            # while we run last one through the graph
-                            if i != num_test_batches - 1:
-                                async_test_loader = Process(
-                                    target=self.getBatch,
-                                    args=(test_set, test_batch_pointer, False))
-                                async_test_loader.start()
-                        else:
-                            eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
-
-                        test_batch_pointer = eval_inputs[5]
-
-                        _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
-                                                 eval_inputs[2], eval_inputs[3],
-                                                 eval_inputs[4], forward_only=True)
-                    print("\tTest: loss %.2f" % step_loss)
-                    sys.stdout.flush()
+            # Shuffle the train set if we have done a full round over it
+            if current_step % num_train_batches == 0:
+                print("Shuffling the train set")
+                shuffle(train_set)
