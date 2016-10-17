@@ -49,9 +49,12 @@ class DataProcessor(object):
             audio_file_text_pairs_final = []
             for audio_file_name in audio_file_text_pairs:
                 if audio_file_name[0].endswith(".flac"):
-                    self.audio_processor.convertAndDeleteFLAC(audio_file_name[0])
-                    audio_file_text_pairs_final.append((audio_file_name[0].replace(".flac", ".wav"),
-                                                        audio_file_name[1]))
+                    if self.audio_processor.convertAndDeleteFLAC(audio_file_name[0]) is True:
+                        audio_file_text_pairs_final.append((audio_file_name[0].replace(".flac", ".wav"),
+                                                            audio_file_name[1]))
+                    else:
+                        # Failed to process the file
+                        break
                 else:
                     audio_file_text_pairs_final.append((audio_file_name[0], audio_file_name[1]))
         else:

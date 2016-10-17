@@ -56,8 +56,11 @@ class AudioProcessor(object):
         return feat_vec, original_feat_vec_length
 
     def convertAndDeleteFLAC(self, audio_file_name):
-        self.convertFlac2Wav(audio_file_name)
-        self.deleteWav(audio_file_name)
+        result = self.convertFlac2Wav(audio_file_name)
+        if result is not None:
+            return self.deleteWav(audio_file_name)
+        else:
+            return False
 
     def computeLogMelFilterBank(self, file_name):
         """
@@ -107,9 +110,10 @@ class AudioProcessor(object):
         Convert the flac file to wav (so we can process on it)
         """
         try:
-            subprocess.call("sox {0} {1}".format(file_name, file_name.replace(".flac", ".wav")))
+            subprocess.call(["sox", file_name, file_name.replace(".flac", ".wav")])
         except OSError as e:
             print("Execution failed:", e)
+            return None
         return file_name.replace(".flac", ".wav")
 
     @staticmethod
@@ -119,6 +123,7 @@ class AudioProcessor(object):
         """
         if file_name.endswith(".flac"):
             os.remove(file_name)
+        return True
 
     @staticmethod
     def extractWavFromSph(sph_file, wav_file, start, end):
