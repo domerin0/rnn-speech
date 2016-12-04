@@ -106,14 +106,9 @@ class HyperParameterHandler(object):
         dic["train_frac"] = config.getfloat(training_section, "train_frac", fallback=None)
         dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
         dic["max_target_seq_length"] = config.getint(training_section, "max_target_seq_length")
-        dic["load_save_input_vec"] = config.getboolean(training_section, "load_save_input_vec", fallback=False)
         dic["async_get_batch"] = config.getboolean(training_section, "async_get_batch", fallback=False)
-        dic["pre_filter_file_size"] = config.getboolean(training_section, "pre_filter_file_size", fallback=False)
         dic["tensorboard_dir"] = config.get(training_section, "tensorboard_dir", fallback=None)
         if dic["tensorboard_dir"] is not None and not os.path.exists(dic["tensorboard_dir"]):
             dic["tensorboard_dir"] = None
-
-        if dic["load_save_input_vec"] is True and dic["async_get_batch"] is True:
-            raise Exception("load_save_input_vec and async_get_batch cannot be activated simultaneously")
 
         return dic

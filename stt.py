@@ -17,8 +17,7 @@ def main():
     prog_params = parse_args()
     serializer = hyperparams.HyperParameterHandler(prog_params['config_file'])
     hyper_params = serializer.getHyperParams()
-    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
-                                                    hyper_params["load_save_input_vec"])
+    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"])
 
     if prog_params['train'] is True:
         train_rnn(audio_processor, hyper_params, prog_params)
@@ -47,12 +46,6 @@ def train_rnn(audio_processor, hyper_params, prog_params):
         # Or use no test set
         test_set = []
 
-    if hyper_params["pre_filter_file_size"] is True:
-        test_set = data_processor.filterDataset(test_set, hyper_params["max_input_seq_length"],
-                                                hyper_params["max_target_seq_length"])
-        train_set = data_processor.filterDataset(train_set, hyper_params["max_input_seq_length"],
-                                                 hyper_params["max_target_seq_length"])
-
     print("Using {0} files in train set".format(len(train_set)))
     print("Using {0} size of test set".format(len(test_set)))
 
@@ -68,7 +61,7 @@ def train_rnn(audio_processor, hyper_params, prog_params):
             sess.run(assign_op)
 
         print("Setting up audio processor...")
-        model.initializeAudioProcessor(hyper_params["max_input_seq_length"], hyper_params["load_save_input_vec"])
+        model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
         print("Start training...")
         model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
                     hyper_params["checkpoint_dir"], hyper_params["async_get_batch"],
@@ -102,7 +95,7 @@ def process_file(audio_processor, hyper_params, file):
 
 def createAcousticModel(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None, tb_run_name=None):
     num_labels = 31
-    input_dim = 123
+    input_dim = 20
     model = AcousticModel(session, num_labels, hyper_params["num_layers"],
                           hyper_params["hidden_size"], hyper_params["dropout"],
                           batch_size, hyper_params["learning_rate"],

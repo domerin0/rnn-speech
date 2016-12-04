@@ -169,14 +169,3 @@ class DataProcessor(object):
                         if extract_result is not False:
                             audio_file_text_pairs.append([wav_file, line_list[6].strip().lower().replace("_", "-")])
         return audio_file_text_pairs, False
-
-    def filterDataset(self, audio_file_text_pairs, max_input_seq_length, max_target_seq_length):
-        new_audio_file_text_pairs = []
-        for [file, text] in audio_file_text_pairs:
-            if len(text) > max_target_seq_length:
-                continue
-            _, original_feat_vec_length = self.audio_processor.processFLACAudio(file)
-            if original_feat_vec_length > max_input_seq_length:
-                continue
-            new_audio_file_text_pairs.append([file, text])
-        return new_audio_file_text_pairs
