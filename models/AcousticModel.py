@@ -212,7 +212,7 @@ class AcousticModel(object):
                 batch_pointer = 0
 
             # Process the audio file to get the input
-            feat_vec, original_feat_vec_length = self.audio_processor.processFLACAudio(file_text[0])
+            feat_vec, original_feat_vec_length = self.audio_processor.process_audio_file(file_text[0])
             # Process the label to get the output
             # Labels len does not need to be always the same as for input, don't need padding
             try:

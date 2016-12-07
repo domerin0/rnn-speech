@@ -1,6 +1,5 @@
 # coding=utf-8
 import numpy as np
-import os
 import subprocess
 import librosa
 
@@ -9,14 +8,14 @@ class AudioProcessor(object):
     def __init__(self, max_input_seq_length):
         self.max_input_seq_length = max_input_seq_length
 
-    def processFLACAudio(self, wav_file_name):
+    def process_audio_file(self, file_name):
         """
         Reads in audio file, processes it
-        Returns padded feature tensor and unpadded length
+        Returns padded feature tensor and original length
         """
-        wav_sig, sr = librosa.load(wav_file_name, mono=True)
+        sig, sr = librosa.load(file_name, mono=True)
         # mfcc
-        mfcc = librosa.feature.mfcc(wav_sig, sr)
+        mfcc = librosa.feature.mfcc(sig, sr)
         # mfcc is of shape (20 mfcc, time_serie)
         transposed_mfcc = mfcc.transpose()
         mfcc_length = len(transposed_mfcc)
@@ -32,34 +31,6 @@ class AudioProcessor(object):
             transposed_mfcc = np.concatenate((transposed_mfcc, padding), 0)
         assert len(transposed_mfcc) == self.max_input_seq_length, "Padding incorrect..."
         return transposed_mfcc, mfcc_length
-
-    def convertAndDeleteFLAC(self, audio_file_name):
-        result = self.convertFlac2Wav(audio_file_name)
-        if result is not None:
-            return self.deleteWav(audio_file_name)
-        else:
-            return False
-
-    @staticmethod
-    def convertFlac2Wav(file_name):
-        """
-        Convert the flac file to wav (so we can process on it)
-        """
-        try:
-            subprocess.call(["sox", file_name, file_name.replace(".flac", ".wav")])
-        except OSError as e:
-            print("Execution failed:", e)
-            return None
-        return file_name.replace(".flac", ".wav")
-
-    @staticmethod
-    def deleteWav(file_name):
-        """
-        Delete wav file after we're done with it
-        """
-        if file_name.endswith(".flac"):
-            os.remove(file_name)
-        return True
 
     @staticmethod
     def extractWavFromSph(sph_file, wav_file, start, end):

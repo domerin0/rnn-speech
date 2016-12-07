@@ -26,9 +26,10 @@ The data is fed through two pipelines, one for testing, and the other for traini
 ####Install dependencies
 
 1. [TensorFlow](https://www.tensorflow.org/versions/r0.8/get_started/os_setup.html) (>= 0.8)
-2. sox (available on both Mac and Linux)
-3. python_speech_features (pip3 install python_speech_features)
-4. h5py (pip3 install h5py)
+1. sox (available on both Mac and Linux)
+1. python_speech_features (pip3 install python_speech_features)
+1. h5py (pip3 install h5py)
+1. tk (sudo apt-get install python3-tk)
 
 #####For Mac
 `$ brew install sox --with-flac`

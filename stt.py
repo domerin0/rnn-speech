@@ -69,7 +69,7 @@ def train_rnn(audio_processor, hyper_params, prog_params):
 
 
 def process_file(audio_processor, hyper_params, file):
-    feat_vec, original_feat_vec_length = audio_processor.processFLACAudio(file)
+    feat_vec, original_feat_vec_length = audio_processor.process_audio_file(file)
     if original_feat_vec_length > hyper_params["max_input_seq_length"]:
         print("File too long")
         return
