@@ -3,9 +3,9 @@ Character level speech recognizer using ctc loss with deep rnns in TensorFlow.
 
 ###About
 
-This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the [paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language model. The acoustic model reads in log mel frequency filterbank feature vectors with energy, delta and delta-delta values (123-dim inputs).
+This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the [paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language model. The acoustic model reads in log mel frequency filterbank feature vectors (40-dim inputs).
 
-The audio signal processing is done using jameslyons' [python_speech_features](https://github.com/jameslyons/python_speech_features), and this [MFCC tutorial](http://www.practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/).
+The audio signal processing is done using librosa.
 
 Currently only the acoustic model has been completed and it still lack a good trained example.
 One pre-trained example is available [here](trained_models/acoustic_model/english_Shtooka/README.md) and can be tried on any file (your own recorded voice for example).
@@ -20,15 +20,14 @@ The datasets currently supported are :
 * [Vystadial 2013](http://hdl.handle.net/11858/00-097C-0000-0023-4670-6)
 * [TED-LIUM](http://www-lium.univ-lemans.fr/en/content/ted-lium-corpus)
 
-The data is fed through two pipelines, one for testing, and the other for training. This can be done asynchronously or the resulting input vector can also be saved to avoid re-processing.
+The data is fed through two pipelines, one for testing, and the other for training.
 
 ###How to Run
 ####Install dependencies
 
 1. [TensorFlow](https://www.tensorflow.org/versions/r0.8/get_started/os_setup.html) (>= 0.8)
 1. sox (available on both Mac and Linux)
-1. python_speech_features (pip3 install python_speech_features)
-1. h5py (pip3 install h5py)
+1. librosa (pip3 install librosa)
 1. tk (sudo apt-get install python3-tk)
 
 #####For Mac
@@ -36,7 +35,7 @@ The data is fed through two pipelines, one for testing, and the other for traini
 #####Ubuntu 14.04
 `$ apt-get install sox`
 
-sox is used for the dataset to convert the files from flac to wav as that was the input file requirement for the features library.
+sox is used for the dataset to convert the files from sph to wav as librosa cannot read sph files.
 
 ####Run data preparation Script
 

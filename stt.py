@@ -64,8 +64,7 @@ def train_rnn(audio_processor, hyper_params, prog_params):
         model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
         print("Start training...")
         model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
-                    hyper_params["checkpoint_dir"], hyper_params["async_get_batch"],
-                    max_epoch=prog_params["max_epoch"])
+                    hyper_params["checkpoint_dir"], max_epoch=prog_params["max_epoch"])
 
 
 def process_file(audio_processor, hyper_params, file):

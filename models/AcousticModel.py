@@ -22,7 +22,6 @@ except ImportError:
     from tensorflow import nn as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
-from multiprocessing import Process, Pipe
 import time
 import sys
 import os
@@ -70,8 +69,6 @@ class AcousticModel(object):
         self.tensorboard_dir = tensorboard_dir
 
         # Initialize data pipes and audio_processor to None
-        self.train_conn = None
-        self.test_conn = None
         self.audio_processor = None
 
         # graph inputs
@@ -244,24 +241,11 @@ class AcousticModel(object):
             batch_counter += 1
 
         input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-        if is_train and self.train_conn is not None:
-            self.train_conn.send([input_feat_vecs, input_feat_vec_lengths,
-                                  target_lengths, target_labels, target_indices, batch_pointer])
-        elif not is_train and self.test_conn is not None:
-            self.test_conn.send([input_feat_vecs, input_feat_vec_lengths,
-                                 target_lengths, target_labels, target_indices, batch_pointer])
-        else:
-            return [input_feat_vecs, input_feat_vec_lengths,
-                    target_lengths, target_labels, target_indices, batch_pointer]
+        return [input_feat_vecs, input_feat_vec_lengths,
+                target_lengths, target_labels, target_indices, batch_pointer]
 
     def initializeAudioProcessor(self, max_input_seq_length):
         self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
-
-    def setConnections(self):
-        # setting up piplines to be able to load data async (one for test set, one for train)
-        parent_train_conn, self.train_conn = Pipe()
-        parent_test_conn, self.test_conn = Pipe()
-        return parent_train_conn, parent_test_conn
 
     @staticmethod
     def getStrLabels(_str):
@@ -316,7 +300,7 @@ class AcousticModel(object):
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
 
-    def run_checkpoint(self, sess, checkpoint_dir, test_set, parent_test_conn=None):
+    def run_checkpoint(self, sess, checkpoint_dir, test_set):
         num_test_batches = self.getNumBatches(test_set)
         test_batch_pointer = 0
 
@@ -326,28 +310,10 @@ class AcousticModel(object):
 
         # Run a test set against the current model
         if num_test_batches > 0:
-            if parent_test_conn is not None:
-                # begin loading test data async
-                # (uses different pipeline than train data)
-                async_test_loader = Process(
-                    target=self.getBatch,
-                    args=(test_set, test_batch_pointer, False))
-                async_test_loader.start()
-
             print(num_test_batches)
             for i in range(num_test_batches):
                 print("On {0}th training iteration".format(i))
-                if parent_test_conn is not None:
-                    eval_inputs = parent_test_conn.recv()
-                    # tell audio processor to go get another batch ready
-                    # while we run last one through the graph
-                    if i != num_test_batches - 1:
-                        async_test_loader = Process(
-                            target=self.getBatch,
-                            args=(test_set, test_batch_pointer, False))
-                        async_test_loader.start()
-                else:
-                    eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
+                eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
 
                 test_batch_pointer = eval_inputs[5]
 
@@ -357,18 +323,9 @@ class AcousticModel(object):
             print("\tTest: loss %.2f" % step_loss)
             sys.stdout.flush()
 
-    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, async_get_batch, max_epoch=None):
+    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
         num_train_batches = self.getNumBatches(train_set)
         train_batch_pointer = 0
-        parent_test_conn = parent_train_conn = None
-
-        if async_get_batch:
-            print("Setting up piplines to test and train data...")
-            parent_train_conn, parent_test_conn = self.setConnections()
-            async_train_loader = Process(
-                target=self.getBatch,
-                args=(train_set, train_batch_pointer, True))
-            async_train_loader.start()
 
         step_time, mean_loss = 0.0, 0.0
         current_step = 0
@@ -378,16 +335,7 @@ class AcousticModel(object):
         while running:
             # begin timer
             start_time = time.time()
-            if async_get_batch:
-                # receive batch from pipe
-                step_batch_inputs = parent_train_conn.recv()
-                # begin fetching other batch while graph processes previous one
-                async_train_loader = Process(
-                    target=self.getBatch,
-                    args=(train_set, train_batch_pointer, True))
-                async_train_loader.start()
-            else:
-                step_batch_inputs = self.getBatch(train_set, train_batch_pointer, True)
+            step_batch_inputs = self.getBatch(train_set, train_batch_pointer, True)
 
             train_batch_pointer = step_batch_inputs[5]
 
@@ -420,7 +368,7 @@ class AcousticModel(object):
             if current_step % steps_per_checkpoint == 0:
                 print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
                       (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))
-                self.run_checkpoint(sess, checkpoint_dir, test_set, parent_test_conn)
+                self.run_checkpoint(sess, checkpoint_dir, test_set)
                 step_time, mean_loss = 0.0, 0.0
 
             # Shuffle the train set if we have done a full round over it
