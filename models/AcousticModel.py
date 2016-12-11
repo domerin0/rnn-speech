@@ -27,6 +27,7 @@ import sys
 import os
 from datetime import datetime
 from random import shuffle
+import threading
 
 
 class AcousticModel(object):
@@ -67,23 +68,19 @@ class AcousticModel(object):
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
         self.tensorboard_dir = tensorboard_dir
+        self.input_dim = input_dim
 
-        # Initialize data pipes and audio_processor to None
+        # Initialize audio_processor to None
         self.audio_processor = None
 
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
-                                     shape=[self.max_input_seq_length, None, input_dim],
+                                     shape=[self.max_input_seq_length, None, self.input_dim],
                                      name="inputs")
         # We could take an int16 for less memory consumption but CTC need an int32
         self.input_seq_lengths = tf.placeholder(tf.int32,
                                                 shape=[None],
                                                 name="input_seq_lengths")
-        # Take an int16 for less memory consumption
-        # max_target_seq_length should be less than 65535 (which is huge)
-        self.target_seq_lengths = tf.placeholder(tf.int16,
-                                                 shape=[None],
-                                                 name="target_seq_lengths")
 
         # Define cells of acoustic model
         cell = rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
@@ -129,24 +126,11 @@ class AcousticModel(object):
         self.prediction = tf.to_int32(ctc.ctc_beam_search_decoder(self.logits, self.input_seq_lengths)[0][0])
 
         if not forward_only:
-            # graph sparse tensor inputs
-            # We could take an int16 for less memory consumption but SparseTensor need an int64
-            self.target_indices = tf.placeholder(tf.int64,
-                                                 shape=[None, 2],
-                                                 name="target_indices")
-            # We could take an int8 for less memory consumption but CTC need an int32
-            self.target_vals = tf.placeholder(tf.int32,
-                                              shape=[None],
-                                              name="target_vals")
-
-            # setup sparse tensor for input into ctc loss
-            sparse_labels = tf.SparseTensor(
-                indices=self.target_indices,
-                values=self.target_vals,
-                shape=[self.batch_size, self.max_target_seq_length])
+            # Sparse tensor for corrects labels input
+            self.sparse_labels = tf.sparse_placeholder(tf.int32)
 
             # compute ctc loss
-            self.ctc_loss = ctc.ctc_loss(self.logits, sparse_labels,
+            self.ctc_loss = ctc.ctc_loss(self.logits, self.sparse_labels,
                                          self.input_seq_lengths)
             self.mean_loss = tf.reduce_mean(self.ctc_loss)
             tf.scalar_summary('Mean loss (Training)', self.mean_loss, collections=[graphkey_training])
@@ -162,10 +146,10 @@ class AcousticModel(object):
 
             # Accuracy
             with tf.name_scope('Accuracy'):
-                errorRate = tf.reduce_sum(tf.edit_distance(self.prediction, sparse_labels, normalize=False)) / \
-                           tf.to_float(tf.size(sparse_labels.values))
-                tf.scalar_summary('Error Rate (Training)', errorRate, collections=[graphkey_training])
-                tf.scalar_summary('Error Rate (Test)', errorRate, collections=[graphkey_test])
+                error_rate = tf.reduce_sum(tf.edit_distance(self.prediction, self.sparse_labels, normalize=False)) / \
+                             tf.to_float(tf.size(self.sparse_labels.values))
+                tf.scalar_summary('Error Rate (Training)', error_rate, collections=[graphkey_training])
+                tf.scalar_summary('Error Rate (Test)', error_rate, collections=[graphkey_test])
 
         # TensorBoard init
         if self.tensorboard_dir is not None:
@@ -184,65 +168,6 @@ class AcousticModel(object):
         # Especially when we process a one time file
         save_list = [var for var in tf.all_variables() if var.name.find('hidden_state') == -1]
         self.saver = tf.train.Saver(save_list)
-
-    def getBatch(self, dataset, batch_pointer, is_train):
-        """
-        Inputs:
-          dataset - tuples of (wav file, transcribed_text)
-          batch_pointer - start point in dataset from where to take the batch
-          is_train - training mode (to choose which pipe to use)
-        Returns:
-          input_feat_vecs, input_feat_vec_lengths, target_lengths,
-            target_labels, target_indices
-        """
-        input_feat_vecs = []
-        input_feat_vec_lengths = []
-        target_lengths = []
-        target_labels = []
-        target_indices = []
-
-        batch_counter = 0
-        while batch_counter < self.batch_size:
-            file_text = dataset[batch_pointer]
-            batch_pointer += 1
-            if batch_pointer == dataset.__len__():
-                batch_pointer = 0
-
-            # Process the audio file to get the input
-            feat_vec, original_feat_vec_length = self.audio_processor.process_audio_file(file_text[0])
-            # Process the label to get the output
-            # Labels len does not need to be always the same as for input, don't need padding
-            try:
-                labels = self.getStrLabels(file_text[1])
-            except:
-                # Incorrect label
-                print("Incorrect label for {0} ({1})".format(file_text[0], file_text[1]))
-                continue
-
-            # Check sizes
-            if (len(labels) > self.max_target_seq_length) or (original_feat_vec_length > self.max_input_seq_length):
-                # If either input or output vector is too long we shouldn't take this sample
-                print("Warning - sample too long : {0} (input : {1} / text : {2})".format(file_text[0],
-                      original_feat_vec_length, len(labels)))
-                continue
-
-            assert len(labels) <= self.max_target_seq_length
-            assert len(feat_vec) <= self.max_input_seq_length
-
-            # Add input to inputs matrix and unpadded or cut size to dedicated vector
-            input_feat_vecs.append(feat_vec)
-            input_feat_vec_lengths.append(min(original_feat_vec_length, self.max_input_seq_length))
-
-            # Compute sparse tensor for labels
-            indices = [[batch_counter, i] for i in range(len(labels))]
-            target_indices += indices
-            target_labels += labels
-            target_lengths.append(len(labels))
-            batch_counter += 1
-
-        input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-        return [input_feat_vecs, input_feat_vec_lengths,
-                target_lengths, target_labels, target_indices, batch_pointer]
 
     def initializeAudioProcessor(self, max_input_seq_length):
         self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
@@ -264,16 +189,15 @@ class AcousticModel(object):
     def getNumBatches(self, dataset):
         return len(dataset) // self.batch_size
 
-    def step(self, session, inputs, input_seq_lengths, target_seq_lengths,
-             target_vals, target_indices, forward_only=False):
+    def step(self, session, input_feat_vecs, mfcc_lengths_batch,
+             label_values_batch, label_indices_batch, forward_only=False):
         """
         Returns:
         ctc_loss, None
-        ctc_loss, None
         """
-        input_feed = {self.inputs.name: np.array(inputs), self.input_seq_lengths.name: np.array(input_seq_lengths),
-                      self.target_seq_lengths.name: np.array(target_seq_lengths),
-                      self.target_indices.name: np.array(target_indices), self.target_vals.name: target_vals}
+        input_feed = {self.inputs: input_feat_vecs, self.input_seq_lengths: mfcc_lengths_batch,
+                      self.sparse_labels: tf.SparseTensorValue(label_indices_batch, label_values_batch,
+                                                               [self.batch_size, self.max_target_seq_length])}
         # Base output is ctc_loss and mean_loss
         output_feed = [self.ctc_loss, self.mean_loss]
         # If a tensorboard dir is configured then we add an merged_summaries operation
@@ -300,10 +224,7 @@ class AcousticModel(object):
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
 
-    def run_checkpoint(self, sess, checkpoint_dir, test_set):
-        num_test_batches = self.getNumBatches(test_set)
-        test_batch_pointer = 0
-
+    def run_checkpoint(self, sess, checkpoint_dir, num_test_batches, dequeue_op):
         # Save the model
         checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
         self.saver.save(sess, checkpoint_path, global_step=self.global_step)
@@ -311,37 +232,138 @@ class AcousticModel(object):
         # Run a test set against the current model
         if num_test_batches > 0:
             print(num_test_batches)
+            mean_loss = 0.0
             for i in range(num_test_batches):
                 print("On {0}th training iteration".format(i))
-                eval_inputs = self.getBatch(test_set, test_batch_pointer, False)
+                input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch = \
+                    self.dequeue_data(sess, dequeue_op)
 
-                test_batch_pointer = eval_inputs[5]
-
-                _, step_loss = self.step(sess, eval_inputs[0], eval_inputs[1],
-                                         eval_inputs[2], eval_inputs[3],
-                                         eval_inputs[4], forward_only=True)
-            print("\tTest: loss %.2f" % step_loss)
+                _, step_loss = self.step(sess, input_feat_vecs, mfcc_lengths_batch,
+                                         label_values_batch, label_indices_batch, forward_only=True)
+                mean_loss = step_loss / num_test_batches
+            print("\tTest: loss %.2f" % mean_loss)
             sys.stdout.flush()
 
-    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
-        num_train_batches = self.getNumBatches(train_set)
-        train_batch_pointer = 0
+    def enqueue_data(self, coord, sess, enqueue_op, dataset, mfcc_input, mfcc_input_length, label, label_length):
+        local_dataset = []
 
-        step_time, mean_loss = 0.0, 0.0
-        current_step = 0
+        while not coord.should_stop():
+            if len(local_dataset) == 0:
+                # Update the local copy of the dataset
+                local_dataset = dataset[:]
+                # Shuffle the local_dataset
+                shuffle(local_dataset)
+
+            [file, text] = local_dataset.pop()
+
+            # Calculate MFCC
+            mfcc_data, original_mfcc_length = self.audio_processor.process_audio_file(file)
+            # Convert string to numbers
+            try:
+                label_data = self.getStrLabels(text)
+            except:
+                # Incorrect label
+                print("Incorrect label for {0} ({1})".format(file, text))
+                continue
+            # Check sizes
+            label_data_length = len(label_data)
+            if (label_data_length > self.max_target_seq_length) or (original_mfcc_length > self.max_input_seq_length):
+                # If either input or output vector is too long we shouldn't take this sample
+                print("Warning - sample too long : {0} (input : {1} / text : {2})".format(file,
+                                                                                          original_mfcc_length,
+                                                                                          label_data_length))
+                continue
+
+            sess.run(enqueue_op, feed_dict={mfcc_input: mfcc_data,
+                                            mfcc_input_length: original_mfcc_length,
+                                            label: label_data,
+                                            label_length: label_data_length})
+
+    @staticmethod
+    def dequeue_data(sess, dequeue_op):
+        # Get data from the queue
+        mfcc_batch, mfcc_lengths_batch, label_batch, label_lengths_batch = sess.run(dequeue_op)
+
+        # Transpose mfcc_batch in order to get time serie as first dimension
+        # [batch_size, time_serie, input_dim] ====> [time_serie, batch_size, input_dim]
+        input_feat_vecs = np.swapaxes(mfcc_batch, 0, 1)
+
+        # Label tensor must be provided as a sparse tensor.
+        # Build a tensor with the values and another with the values of each label
+        label_values_batch = []
+        label_indices_batch = []
+
+        for row in range(len(label_lengths_batch)):
+            # Because the queue is padding, we use label_length which can be shorter than len(label)
+            # We don't want to store the padding into the sparse tensor
+            for column in range(label_lengths_batch[row]):
+                label_indices_batch.append([row, column])
+                label_values_batch.append(label_batch[row][column])
+
+        return input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch
+
+    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
+        # Create a queue for each dataset and a coordinator
+        train_queue = tf.PaddingFIFOQueue(self.batch_size * 3, [tf.int32, tf.int32, tf.int32, tf.int32],
+                                          shapes=[[self.max_input_seq_length, self.input_dim], [], [None], []])
+        #test_queue = tf.PaddingFIFOQueue(self.batch_size * 3, [tf.int32, tf.int32, tf.int32, tf.int32],
+        #                                 shapes=[[self.max_input_seq_length, self.input_dim], [], [None], []])
+        coord = tf.train.Coordinator()
+
+        # Define the enqueue operation for training data
+        train_mfcc_input = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, self.input_dim])
+        train_mfcc_input_length = tf.placeholder(tf.int32, shape=[])
+        train_label = tf.placeholder(tf.int32, shape=[None])
+        train_label_length = tf.placeholder(tf.int32, shape=[])
+        train_enqueue_op = train_queue.enqueue([train_mfcc_input, train_mfcc_input_length,
+                                                train_label, train_label_length])
+        train_dequeue_op = train_queue.dequeue_many(self.batch_size)
+
+        # Define the enqueue operation for test data
+        #TODO: loading test data is deactivated because of a conflict with the tread for train data... To debug...
+        #test_mfcc_input = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, self.input_dim])
+        #test_mfcc_input_length = tf.placeholder(tf.int32, shape=[])
+        #test_label = tf.placeholder(tf.int32, shape=[None])
+        #test_label_length = tf.placeholder(tf.int32, shape=[])
+        #test_enqueue_op = test_queue.enqueue([test_mfcc_input, test_mfcc_input_length,
+        #                                      test_label, test_label_length])
+        #test_dequeue_op = test_queue.dequeue_many(self.batch_size)
+
+        # Create the threads
+        # TODO: implement a way to slice the set in order to deploy more than one thread
+        train_threads = [threading.Thread(target=self.enqueue_data,
+                                          args=(coord, sess, train_enqueue_op, train_set, train_mfcc_input,
+                                                train_mfcc_input_length, train_label, train_label_length))
+                         for _ in range(1)]
+        #test_threads = [threading.Thread(target=self.enqueue_data,
+        #                                 args=(coord, sess, test_enqueue_op, test_set, test_mfcc_input,
+        #                                       test_mfcc_input_length, test_label, test_label_length))
+        #                for _ in range(1)]
+        for t in train_threads:
+            t.start()
+        #for t in test_threads:
+        #    t.start()
+
         previous_loss = 0
         no_improvement_since = 0
-        running = True
-        while running:
-            # begin timer
+        num_train_batches = self.getNumBatches(train_set)
+
+        step_time, mean_loss = 0.0, 0.0
+        current_step = 1
+
+        # Main training loop
+        for _ in range(1000000):
+            if coord.should_stop():
+                break
+
             start_time = time.time()
-            step_batch_inputs = self.getBatch(train_set, train_batch_pointer, True)
 
-            train_batch_pointer = step_batch_inputs[5]
+            input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch = \
+                self.dequeue_data(sess, train_dequeue_op)
 
-            _, step_loss = self.step(sess, step_batch_inputs[0], step_batch_inputs[1],
-                                     step_batch_inputs[2], step_batch_inputs[3],
-                                     step_batch_inputs[4], forward_only=False)
+            _, step_loss = self.step(sess, input_feat_vecs, mfcc_lengths_batch,
+                                     label_values_batch, label_indices_batch, forward_only=False)
+
             # Decrease learning rate if no improvement was seen over last 6 steps
             if step_loss >= previous_loss:
                 no_improvement_since += 1
@@ -355,23 +377,31 @@ class AcousticModel(object):
                 no_improvement_since = 0
             previous_loss = step_loss
 
+            # Print step result
             print("Step {0} with loss {1}".format(current_step, step_loss))
             step_time += (time.time() - start_time) / steps_per_checkpoint
             mean_loss += step_loss / steps_per_checkpoint
 
+            # Check if we are at a checkpoint
+            if current_step % steps_per_checkpoint == 0:
+                print("Global step %d learning rate %.4f step-time %.2f loss %.2f" %
+                      (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))
+                #num_test_batches = self.getNumBatches(test_set)
+                #self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
+                step_time, mean_loss = 0.0, 0.0
+
             current_step += 1
             if (max_epoch is not None) and (current_step > max_epoch):
                 # We have reached the maximum allowed, we should exit at the end of this run
-                running = False
-
-            # Check if we are at a checkpoint
-            if current_step % steps_per_checkpoint == 0:
-                print("global step %d learning rate %.4f step-time %.2f loss %.2f" %
-                      (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))
-                self.run_checkpoint(sess, checkpoint_dir, test_set)
-                step_time, mean_loss = 0.0, 0.0
+                break
 
             # Shuffle the train set if we have done a full round over it
             if current_step % num_train_batches == 0:
                 print("Shuffling the train set")
                 shuffle(train_set)
+
+        # Ask the threads to stop.
+        coord.request_stop()
+        # And wait for them to actually do it.
+        coord.join(train_threads)
+        #coord.join(test_threads)
