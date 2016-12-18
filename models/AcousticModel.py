@@ -205,6 +205,7 @@ class AcousticModel(object):
         output_feed = [self.ctc_loss, self.mean_loss]
 
         # If a tensorboard dir is configured then add a merged_summaries operation
+        run_options = run_metadata = None
         if self.tensorboard_dir is not None:
             if forward_only:
                 output_feed.append(self.test_summaries)
@@ -212,7 +213,6 @@ class AcousticModel(object):
                 output_feed.append(self.train_summaries)
 
             # Add timeline data generation options if needed
-            run_options = run_metadata = None
             if self.timeline_enabled is True:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
@@ -303,9 +303,9 @@ class AcousticModel(object):
             if (t_local_data.label_data_length > self.max_target_seq_length) or\
                     (t_local_data.original_mfcc_length > self.max_input_seq_length):
                 # If either input or output vector is too long we shouldn't take this sample
-                print("Warning - sample too long : {0} (input : {1} / text : {2})".format(t_local_data.file,
-                                                                                          t_local_data.original_mfcc_length,
-                                                                                          t_local_data.label_data_length))
+                print("Warning - sample too long : {0}"
+                      "(input : {1} / text : {2})".format(t_local_data.file, t_local_data.original_mfcc_length,
+                                                          t_local_data.label_data_length))
                 continue
 
             sess.run(enqueue_op, feed_dict={mfcc_input: t_local_data.mfcc_data,
