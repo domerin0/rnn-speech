@@ -49,7 +49,8 @@ def train_rnn(audio_processor, hyper_params, prog_params):
     print("Using {0} files in train set".format(len(train_set)))
     print("Using {0} size of test set".format(len(test_set)))
 
-    with tf.Session() as sess:
+    with tf.Session(config=tf.ConfigProto(inter_op_parallelism_threads=10,
+                                          intra_op_parallelism_threads=10)) as sess:
         # create model
         print("Building model... (this takes a while)")
         model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"],
@@ -60,8 +61,6 @@ def train_rnn(audio_processor, hyper_params, prog_params):
             assign_op = model.learning_rate.assign(prog_params["learn_rate"])
             sess.run(assign_op)
 
-        print("Setting up audio processor...")
-        model.initializeAudioProcessor(hyper_params["max_input_seq_length"])
         print("Start training...")
         model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
                     hyper_params["checkpoint_dir"], max_epoch=prog_params["max_epoch"])
