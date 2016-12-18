@@ -3,12 +3,16 @@ Character level speech recognizer using ctc loss with deep rnns in TensorFlow.
 
 ###About
 
-This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the [paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language model. The acoustic model reads in log mel frequency filterbank feature vectors (40-dim inputs).
+This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the
+[paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level
+using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language
+model. The acoustic model reads in log mel frequency filterbank feature vectors (40-dim inputs).
 
 The audio signal processing is done using librosa.
 
 Currently only the acoustic model has been completed and it still lack a good trained example.
-One pre-trained example is available [here](trained_models/acoustic_model/english_Shtooka/README.md) and can be tried on any file (your own recorded voice for example).
+One pre-trained example is available [here](trained_models/acoustic_model/english_Shtooka/README.md) and can be tried
+on any file (your own recorded voice for example).
 
 The character-level language model is still in the works.
 
@@ -27,8 +31,9 @@ The data is fed through two pipelines, one for testing, and the other for traini
 
 1. [TensorFlow](https://www.tensorflow.org/versions/r0.8/get_started/os_setup.html) (>= 0.8)
 1. sox (available on both Mac and Linux)
-1. librosa (pip3 install librosa)
-1. tk (sudo apt-get install python3-tk)
+1. librosa `pip3 install librosa`
+1. tk `sudo apt-get install python3-tk`
+1. (optional,  for timeline only) libcupti `sudo apt-get install libcupti`
 
 #####For Mac
 `$ brew install sox --with-flac`
@@ -50,25 +55,36 @@ It will remove the tar files after downloading and unzipping.
 
 #### Change Network Parameters
 
-All hyper parameters for the network are defined in `config.ini`. A different config file can be fed to the training program using something like:
+All hyper parameters for the network are defined in `config.ini`. A different config file can be fed to the training
+program using something like:
 
 ``$ python stt.py --config_file="different_config_file.ini"``
 
 You should ensure it follows the same format as the one provided.
 
 ####Running Optimizer
-Once your dependencies are set up, and data is downloaded and extracted into the appropriate location, the optimizer can be started by doing :
+Once your dependencies are set up, and data is downloaded and extracted into the appropriate location,
+the optimizer can be started by doing :
 
 ``$ python stt.py --train``
 
-Dynamic RNNs are used as memory consumption on the entirely unrolled network was massive, and the model would take 30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it (as the model can now fit on a single GPU).
+Dynamic RNNs are used as memory consumption on the entirely unrolled network was massive, and the model would take
+30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it
+(as the model can now fit on a single GPU).
 
 ####Running the network
 You can also use a trained network to process a wav file
 
 ``$ python stt.py --file "path_to_file.wav"``
 
-The result will be printed on standard input. At this time only the acoustic model will process so the result can be weird.  
+The result will be printed on standard input. At this time only the acoustic model will process so the result can be
+weird.  
+
+####Analysing performance
+You can add the `--timeline` option in order to produce a timeline file and see how everything is going.
+
+The resulting file will be overridden at each step. It can be opened with Chrome, opening `chrome://tracing/` and
+loading the file.
 
 ###Project Road Map
 
@@ -79,8 +95,8 @@ With verification and testing performed somewhere at every step:
 3. Wrap acoustic model and language model into general 'Speech Recognizer'
 4. Add ability for human to sample and test
 
-Ultimately I'd like to work towards bridging this with my other project [neural-chatbot](https://github.com/inikdom/neural-chatbot)
-to make an open-source natural conversational engine.
+Ultimately I'd like to work towards bridging this with my other project
+[neural-chatbot](https://github.com/inikdom/neural-chatbot) to make an open-source natural conversational engine.
 
 ###License
 
@@ -90,7 +106,7 @@ MIT
 ###References
 #### LibriSpeech
 ````
-"LibriSpeech: an ASR corpus based on public domain audio books", Vassil Panayotov, Guoguo Chen, Daniel Povey and Sanjeev Khudanpur, ICASSP 2015
+"LibriSpeech: an ASR corpus based on public domain audio books", Vassil Panayotov, Guoguo Chen, Daniel Povey andSanjeev Khudanpur, ICASSP 2015
 ````
 
 #### Shtooka

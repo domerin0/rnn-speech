@@ -34,7 +34,8 @@ class AcousticModel(object):
     def __init__(self, session, num_labels, num_layers, hidden_size, dropout,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
                  max_input_seq_length, max_target_seq_length, input_dim,
-                 forward_only=False, tensorboard_dir=None, tb_run_name=None):
+                 forward_only=False, tensorboard_dir=None, tb_run_name=None,
+                 timeline_enabled=False):
         """
         Acoustic rnn model, using ctc loss with lstm cells
         Inputs:
@@ -72,6 +73,7 @@ class AcousticModel(object):
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
         self.tensorboard_dir = tensorboard_dir
+        self.timeline_enabled = timeline_enabled
         self.input_dim = input_dim
 
         # Initialize audio_processor
@@ -201,18 +203,41 @@ class AcousticModel(object):
                                                                [self.batch_size, self.max_target_seq_length])}
         # Base output is ctc_loss and mean_loss
         output_feed = [self.ctc_loss, self.mean_loss]
-        # If a tensorboard dir is configured then we add an merged_summaries operation
+
+        # If a tensorboard dir is configured then add a merged_summaries operation
         if self.tensorboard_dir is not None:
             if forward_only:
                 output_feed.append(self.test_summaries)
             else:
                 output_feed.append(self.train_summaries)
-        # If we are in training then we add the update operation
+
+            # Add timeline data generation options if needed
+            run_options = run_metadata = None
+            if self.timeline_enabled is True:
+                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                run_metadata = tf.RunMetadata()
+
+        # If in training then add the update operation
         if not forward_only:
             output_feed.append(self.update)
-        outputs = session.run(output_feed, input_feed)
+
+        # Actually run the tensorflow session
+        outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
+
+        # If a tensorboard dir is configured then generate the summary for this operation
         if self.tensorboard_dir is not None:
             self.summary_writer.add_summary(outputs[2], self.global_step.eval())
+
+            # ...and produce the timeline if needed
+            if self.timeline_enabled is True:
+                # Create the Timeline object, and write it to a json
+                from tensorflow.python.client import timeline
+                tl = timeline.Timeline(run_metadata.step_stats)
+                ctf = tl.generate_chrome_trace_format()
+                with open(self.tensorboard_dir + '/' + 'timeline.json', 'w') as f:
+                    print("writing to timeline.json")
+                    f.write(ctf)
+
         return outputs[0], outputs[1]
 
     def process_input(self, session, inputs, input_seq_lengths):

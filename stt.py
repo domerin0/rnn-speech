@@ -52,9 +52,9 @@ def train_rnn(audio_processor, hyper_params, prog_params):
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params, hyper_params["batch_size"],
-                                    forward_only=False, tensorboard_dir=hyper_params["tensorboard_dir"],
-                                    tb_run_name=prog_params["tb_name"])
+        model = create_acoustic_model(sess, hyper_params, hyper_params["batch_size"],
+                                      forward_only=False, tensorboard_dir=hyper_params["tensorboard_dir"],
+                                      tb_run_name=prog_params["tb_name"], timeline_enabled=prog_params["timeline"])
         # Override the learning rate if given on the command line
         if prog_params["learn_rate"] is not None:
             assign_op = model.learning_rate.assign(prog_params["learn_rate"])
@@ -74,7 +74,8 @@ def process_file(audio_processor, hyper_params, file):
     with tf.Session() as sess:
         # create model
         print("Building model... (this takes a while)")
-        model = createAcousticModel(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None, tb_run_name=None)
+        model = create_acoustic_model(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None,
+                                      tb_run_name=None, timeline_enabled=False)
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
@@ -90,17 +91,16 @@ def process_file(audio_processor, hyper_params, file):
         print(transcribed_text)
 
 
-def createAcousticModel(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None, tb_run_name=None):
+def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None,
+                          tb_run_name=None, timeline_enabled=False):
     num_labels = 31
     input_dim = 20
-    model = AcousticModel(session, num_labels, hyper_params["num_layers"],
-                          hyper_params["hidden_size"], hyper_params["dropout"],
-                          batch_size, hyper_params["learning_rate"],
+    model = AcousticModel(session, num_labels, hyper_params["num_layers"], hyper_params["hidden_size"],
+                          hyper_params["dropout"], batch_size, hyper_params["learning_rate"],
                           hyper_params["lr_decay_factor"], hyper_params["grad_clip"],
-                          hyper_params["max_input_seq_length"],
-                          hyper_params["max_target_seq_length"],
-                          input_dim, forward_only=forward_only,
-                          tensorboard_dir=tensorboard_dir, tb_run_name=tb_run_name)
+                          hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
+                          input_dim, forward_only=forward_only, tensorboard_dir=tensorboard_dir,
+                          tb_run_name=tb_run_name, timeline_enabled=timeline_enabled)
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     # Initialize variables
     session.run(tf.initialize_all_variables())
@@ -118,10 +118,10 @@ def parse_args():
     Parses the command line input.
 
     """
-    DEFAULT_CONFIG_FILE = 'config.ini'
+    _DEFAULT_CONFIG_FILE = 'config.ini'
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default=DEFAULT_CONFIG_FILE,
+    parser.add_argument('--config', type=str, default=_DEFAULT_CONFIG_FILE,
                         help='Path to configuration file with hyper-parameters.')
     parser.add_argument('--tb_name', type=str, default=None,
                         help='Tensorboard path name for the run (allow multiples run with the same output path)')
@@ -129,6 +129,10 @@ def parse_args():
                         help='Max epoch to train (no limitation if not provided)')
     parser.add_argument('--learn_rate', type=float, default=None,
                         help='Force learning rate to start from this value (overriding checkpoint value)')
+    parser.set_defaults(timeline=False)
+    parser.add_argument('--timeline', dest='timeline', action='store_true',
+                        help='Generate a json file with the timeline (a tensorboard directory'
+                             'must be provided in config file)')
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.set_defaults(train=False)
@@ -136,8 +140,9 @@ def parse_args():
     group.add_argument('--file', type=str, help='Path to a wav file to process')
 
     args = parser.parse_args()
-    prog_params = {'file': args.file, 'config_file': args.config, 'train': args.train, 'tb_name': args.tb_name,
-                   'max_epoch': args.max_epoch, 'learn_rate': args.learn_rate}
+    prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'max_epoch': args.max_epoch,
+                   'learn_rate': args.learn_rate, 'timeline': args.timeline, 'train': args.train,
+                   'file': args.file}
     return prog_params
 
 
