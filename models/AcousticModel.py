@@ -336,6 +336,11 @@ class AcousticModel(object):
 
         return input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch
 
+    @staticmethod
+    def partition(lst, n):
+        division = len(lst) / float(n)
+        return [lst[int(round(division * i)): int(round(division * (i + 1)))] for i in range(n)]
+
     def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
         # Create a queue for each dataset and a coordinator
         train_queue = tf.PaddingFIFOQueue(self.batch_size * 3, [tf.int32, tf.int32, tf.int32, tf.int32],
@@ -363,18 +368,20 @@ class AcousticModel(object):
         test_dequeue_op = test_queue.dequeue_many(self.batch_size)
 
         # Create the threads
-        # TODO: implement a way to slice the set in order to deploy more than one thread
         thread_local_data = threading.local()
+        nb_threads = 2
+        partitioned_train_set = self.partition(train_set, nb_threads)
         train_threads = [threading.Thread(name="train_enqueue", target=self.enqueue_data,
-                                          args=(coord, sess, thread_local_data, train_enqueue_op, train_set,
-                                                train_mfcc_input, train_mfcc_input_length, train_label,
-                                                train_label_length))
-                         for _ in range(1)]
+                                          args=(coord, sess, thread_local_data, train_enqueue_op,
+                                                partitioned_train_set[i], train_mfcc_input, train_mfcc_input_length,
+                                                train_label, train_label_length))
+                         for i in range(nb_threads)]
+        partitioned_test_set = self.partition(test_set, nb_threads)
         test_threads = [threading.Thread(name="test_enqueue", target=self.enqueue_data,
-                                         args=(coord, sess, thread_local_data, test_enqueue_op, test_set,
-                                               test_mfcc_input, test_mfcc_input_length, test_label,
-                                               test_label_length))
-                        for _ in range(1)]
+                                         args=(coord, sess, thread_local_data, test_enqueue_op,
+                                               partitioned_test_set[i], test_mfcc_input, test_mfcc_input_length,
+                                               test_label, test_label_length))
+                        for i in range(nb_threads)]
         for t in train_threads:
             t.start()
         for t in test_threads:
