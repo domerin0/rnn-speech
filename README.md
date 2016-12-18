@@ -33,7 +33,7 @@ The data is fed through two pipelines, one for testing, and the other for traini
 1. sox (available on both Mac and Linux)
 1. librosa `pip3 install librosa`
 1. tk `sudo apt-get install python3-tk`
-1. (optional,  for timeline only) libcupti `sudo apt-get install libcupti`
+1. (optional,  for timeline only) libcupti `sudo apt-get install libcupti-dev`
 
 #####For Mac
 `$ brew install sox --with-flac`
