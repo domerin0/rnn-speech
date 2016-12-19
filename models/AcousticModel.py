@@ -68,8 +68,7 @@ class AcousticModel(object):
         tf.scalar_summary('Learning rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
         self.learning_rate_decay_op = self.learning_rate.assign(learning_rate * lr_decay_factor)
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
-        self.dropout_keep_prob_lstm_input = tf.constant(self.dropout)
-        self.dropout_keep_prob_lstm_output = tf.constant(self.dropout)
+        self.dropout = dropout
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
         self.tensorboard_dir = tensorboard_dir
@@ -90,10 +89,15 @@ class AcousticModel(object):
 
         # Define cells of acoustic model
         cell = rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
-        if not forward_only:
-            # If we are in training then add a dropoutWrapper to the cells
-            cell = rnn_cell.DropoutWrapper(cell, input_keep_prob=self.dropout_keep_prob_lstm_input,
-                                           output_keep_prob=self.dropout_keep_prob_lstm_output)
+
+        # Define a dropout layer (used only when training)
+        with tf.name_scope('dropout'):
+            self.dropout_ph = tf.placeholder(tf.float32)
+            if not forward_only:
+                # If we are in training then add a dropoutWrapper to the cells
+                tf.summary.scalar('dropout_keep_probability', self.dropout_ph)
+                cell = rnn_cell.DropoutWrapper(cell, input_keep_prob=self.dropout_ph,
+                                               output_keep_prob=self.dropout_ph)
 
         if num_layers > 1:
             cell = rnn_cell.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
@@ -217,9 +221,14 @@ class AcousticModel(object):
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
 
-        # If in training then add the update operation
-        if not forward_only:
+        if forward_only is True:
+            # If not in training then no need to apply a dropout, set the keep probability to 1.0
+            input_feed[self.dropout_ph] = 1.0
+        else:
+            # If in training then add the update operation
             output_feed.append(self.update)
+            # and feed the dropout layer a keep probability value
+            input_feed[self.dropout_ph] = self.dropout
 
         # Actually run the tensorflow session
         outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
@@ -245,7 +254,8 @@ class AcousticModel(object):
         Returns:
           Translated text
         """
-        input_feed = {self.inputs.name: np.array(inputs), self.input_seq_lengths.name: np.array(input_seq_lengths)}
+        input_feed = {self.dropout_ph: 1.0, self.inputs.name: np.array(inputs),
+                      self.input_seq_lengths.name: np.array(input_seq_lengths)}
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed)
         return outputs[0]
