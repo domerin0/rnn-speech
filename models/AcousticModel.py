@@ -133,8 +133,9 @@ class AcousticModel(object):
             self.ctc_loss = tf.nn.ctc_loss(self.logits, self.sparse_labels,
                                            self.input_seq_lengths)
             self.mean_loss = tf.reduce_mean(self.ctc_loss)
-            tf.summary.scalar('Mean loss (Training)', self.mean_loss, collections=[graphkey_training])
-            tf.summary.scalar('Mean loss (Test)', self.mean_loss, collections=[graphkey_test])
+            with tf.name_scope('Mean_loss'):
+                tf.summary.scalar('Training', self.mean_loss, collections=[graphkey_training])
+                tf.summary.scalar('Test', self.mean_loss, collections=[graphkey_test])
             params = tf.trainable_variables()
 
             opt = tf.train.AdamOptimizer(self.learning_rate)
@@ -145,11 +146,11 @@ class AcousticModel(object):
                                               global_step=self.global_step)
 
             # Accuracy
-            with tf.name_scope('Accuracy'):
+            with tf.name_scope('Accuracy_-_Error_Rate'):
                 error_rate = tf.reduce_sum(tf.edit_distance(self.prediction, self.sparse_labels, normalize=False)) / \
                              tf.to_float(tf.size(self.sparse_labels.values))
-                tf.summary.scalar('Error Rate (Training)', error_rate, collections=[graphkey_training])
-                tf.summary.scalar('Error Rate (Test)', error_rate, collections=[graphkey_test])
+                tf.summary.scalar('Training', error_rate, collections=[graphkey_training])
+                tf.summary.scalar('Test', error_rate, collections=[graphkey_test])
 
         # TensorBoard init
         if self.tensorboard_dir is not None:
