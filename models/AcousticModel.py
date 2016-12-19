@@ -10,16 +10,6 @@ acoustic RNN trained with ctc loss
 """
 
 import tensorflow as tf
-try:
-    from tensorflow.models.rnn import rnn_cell, rnn
-except ImportError:
-    # TensorFlow >= 0.8
-    from tensorflow.python.ops import rnn_cell, rnn
-try:
-    import tensorflow.contrib.ctc as ctc
-except ImportError:
-    # TensorFlow >= 0.10
-    from tensorflow import nn as ctc
 import util.audioprocessor as audioprocessor
 import numpy as np
 import time
@@ -65,7 +55,7 @@ class AcousticModel(object):
         self.dropout = dropout
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False, name='learning_rate')
-        tf.scalar_summary('Learning rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
+        tf.summary.scalar('Learning rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
         self.learning_rate_decay_op = self.learning_rate.assign(learning_rate * lr_decay_factor)
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.dropout = dropout
@@ -88,7 +78,7 @@ class AcousticModel(object):
                                                 name="input_seq_lengths")
 
         # Define cells of acoustic model
-        cell = rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
+        cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
 
         # Define a dropout layer (used only when training)
         with tf.name_scope('dropout'):
@@ -96,11 +86,11 @@ class AcousticModel(object):
             if not forward_only:
                 # If we are in training then add a dropoutWrapper to the cells
                 tf.summary.scalar('dropout_keep_probability', self.dropout_ph)
-                cell = rnn_cell.DropoutWrapper(cell, input_keep_prob=self.dropout_ph,
-                                               output_keep_prob=self.dropout_ph)
+                cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=self.dropout_ph,
+                                                     output_keep_prob=self.dropout_ph)
 
         if num_layers > 1:
-            cell = rnn_cell.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
+            cell = tf.nn.rnn_cell.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
 
         # build input layer
         with tf.name_scope('Input_Layer'):
@@ -117,10 +107,10 @@ class AcousticModel(object):
 
         # build rnn
         with tf.name_scope('Dynamic_rnn'):
-            rnn_output, self.hidden_state = rnn.dynamic_rnn(cell, tf.pack(inputs),
-                                                            sequence_length=self.input_seq_lengths,
-                                                            initial_state=init_state,
-                                                            time_major=True, parallel_iterations=1000)
+            rnn_output, self.hidden_state = tf.nn.dynamic_rnn(cell, tf.pack(inputs),
+                                                              sequence_length=self.input_seq_lengths,
+                                                              initial_state=init_state,
+                                                              time_major=True, parallel_iterations=1000)
 
         # build output layer
         with tf.name_scope('Output_layer'):
@@ -133,18 +123,18 @@ class AcousticModel(object):
                                for i in tf.split(0, self.max_input_seq_length, rnn_output)])
 
         # compute prediction
-        self.prediction = tf.to_int32(ctc.ctc_beam_search_decoder(self.logits, self.input_seq_lengths)[0][0])
+        self.prediction = tf.to_int32(tf.nn.ctc_beam_search_decoder(self.logits, self.input_seq_lengths)[0][0])
 
         if not forward_only:
             # Sparse tensor for corrects labels input
             self.sparse_labels = tf.sparse_placeholder(tf.int32)
 
             # compute ctc loss
-            self.ctc_loss = ctc.ctc_loss(self.logits, self.sparse_labels,
-                                         self.input_seq_lengths)
+            self.ctc_loss = tf.nn.ctc_loss(self.logits, self.sparse_labels,
+                                           self.input_seq_lengths)
             self.mean_loss = tf.reduce_mean(self.ctc_loss)
-            tf.scalar_summary('Mean loss (Training)', self.mean_loss, collections=[graphkey_training])
-            tf.scalar_summary('Mean loss (Test)', self.mean_loss, collections=[graphkey_test])
+            tf.summary.scalar('Mean loss (Training)', self.mean_loss, collections=[graphkey_training])
+            tf.summary.scalar('Mean loss (Test)', self.mean_loss, collections=[graphkey_test])
             params = tf.trainable_variables()
 
             opt = tf.train.AdamOptimizer(self.learning_rate)
@@ -158,25 +148,25 @@ class AcousticModel(object):
             with tf.name_scope('Accuracy'):
                 error_rate = tf.reduce_sum(tf.edit_distance(self.prediction, self.sparse_labels, normalize=False)) / \
                              tf.to_float(tf.size(self.sparse_labels.values))
-                tf.scalar_summary('Error Rate (Training)', error_rate, collections=[graphkey_training])
-                tf.scalar_summary('Error Rate (Test)', error_rate, collections=[graphkey_test])
+                tf.summary.scalar('Error Rate (Training)', error_rate, collections=[graphkey_training])
+                tf.summary.scalar('Error Rate (Test)', error_rate, collections=[graphkey_test])
 
         # TensorBoard init
         if self.tensorboard_dir is not None:
-            self.train_summaries = tf.merge_all_summaries(key=graphkey_training)
-            self.test_summaries = tf.merge_all_summaries(key=graphkey_test)
+            self.train_summaries = tf.summary.merge_all(key=graphkey_training)
+            self.test_summaries = tf.summary.merge_all(key=graphkey_test)
             if tb_run_name is None:
                 run_name = datetime.now().strftime('%Y-%m-%d--%H-%M-%S')
             else:
                 run_name = tb_run_name
-            self.summary_writer = tf.train.SummaryWriter(tensorboard_dir + '/' + run_name + '/', graph=session.graph)
+            self.summary_writer = tf.summary.FileWriter(tensorboard_dir + '/' + run_name + '/', graph=session.graph)
         else:
             self.summary_writer = None
 
         # We need to save all variables except for the hidden_state
         # we keep it across batches but we don't need it across different runs
         # Especially when we process a one time file
-        save_list = [var for var in tf.all_variables() if var.name.find('hidden_state') == -1]
+        save_list = [var for var in tf.global_variables() if var.name.find('hidden_state') == -1]
         self.saver = tf.train.Saver(save_list)
 
     @staticmethod

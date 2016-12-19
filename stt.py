@@ -3,7 +3,6 @@
 Main program to use the speech recognizer.
 """
 
-from tensorflow.python.platform import gfile
 from models.AcousticModel import AcousticModel
 import tensorflow as tf
 import util.hyperparams as hyperparams
@@ -103,7 +102,7 @@ def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, 
                           tb_run_name=tb_run_name, timeline_enabled=timeline_enabled)
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     # Initialize variables
-    session.run(tf.initialize_all_variables())
+    session.run(tf.global_variables_initializer())
     # Restore from checkpoint (will overwrite variables)
     if ckpt:
         print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
