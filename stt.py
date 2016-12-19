@@ -105,7 +105,7 @@ def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, 
     # Initialize variables
     session.run(tf.initialize_all_variables())
     # Restore from checkpoint (will overwrite variables)
-    if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
+    if ckpt:
         print("Reading model parameters from {0}".format(ckpt.model_checkpoint_path))
         model.saver.restore(session, ckpt.model_checkpoint_path)
     else:
