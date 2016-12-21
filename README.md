@@ -8,7 +8,7 @@ This is an ongoing project, working towards an implementation of the charater-le
 using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language
 model. The acoustic model reads in log mel frequency filterbank feature vectors (40-dim inputs).
 
-The audio signal processing is done using librosa.
+The audio signal processing is done using [librosa](https://github.com/librosa/librosa).
 
 Currently only the acoustic model has been completed and it still lack a good trained example.
 One pre-trained example is available [here](trained_models/acoustic_model/english_Shtooka/README.md) and can be tried
@@ -28,20 +28,23 @@ The data is fed through two pipelines, one for testing, and the other for traini
 
 ###How to Run
 ####Install dependencies
+#####Required
 
-1. [TensorFlow](https://www.tensorflow.org/versions/r0.8/get_started/os_setup.html) (>= 0.8)
-1. sox (available on both Mac and Linux)
-1. librosa `pip3 install librosa`
-1. tk `sudo apt-get install python3-tk`
-1. (optional,  for timeline only) libcupti `sudo apt-get install libcupti-dev`
-1. (optional, for live transcript only) pyaudio `sudo apt-get install python3-pyaudio`
+1. [TensorFlow](https://www.tensorflow.org) (>= 0.12RC1)
+1. [librosa](https://github.com/librosa/librosa)
 
-#####For Mac
-`$ brew install sox --with-flac`
-#####Ubuntu 14.04
-`$ apt-get install sox`
+Install [TensorFlow](https://www.tensorflow.org) by following the website documentation. GPU support is not
+mandatory but strongly recommended if you intend to train the RNN.
 
-sox is used for the dataset to convert the files from sph to wav as librosa cannot read sph files.
+Install other required dependencies by running :
+
+`pip3 install -r requirements.txt`
+
+#####Optional
+1. sox (for live transcript only, install with `sudo apt-get install sox` or `brew install sox --with-flac`)
+1. libcupti (for timeline only, install with : `sudo apt-get install libcupti-dev`)
+1. pyaudio (for live transcript only, install with : `sudo apt-get install python3-pyaudio`)
+
 
 ####Run data preparation Script
 
