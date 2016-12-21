@@ -14,6 +14,9 @@ class AudioProcessor(object):
         Returns padded feature tensor and original length
         """
         sig, sr = librosa.load(file_name, mono=True)
+        return self.extract_mfcc(sig, sr)
+
+    def extract_mfcc(self, sig, sr):
         # mfcc
         mfcc = librosa.feature.mfcc(sig, sr)
         # mfcc is of shape (20 mfcc, time_serie)

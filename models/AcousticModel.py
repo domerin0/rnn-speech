@@ -19,6 +19,7 @@ from datetime import datetime
 from random import shuffle
 import threading
 
+_CHAR_MAP = "abcdefghijklmnopqrstuvwxyz .'-_"
 
 class AcousticModel(object):
     def __init__(self, session, num_labels, num_layers, hidden_size, dropout,
@@ -172,7 +173,6 @@ class AcousticModel(object):
 
     @staticmethod
     def get_str_labels(_str):
-        allowed_chars = "abcdefghijklmnopqrstuvwxyz .'-_"
         # Remove punctuation
         _str = _str.replace(".", "")
         _str = _str.replace(",", "")
@@ -182,7 +182,18 @@ class AcousticModel(object):
         _str = _str.replace(":", "")
         # add eos char
         _str += "_"
-        return [allowed_chars.index(char) for char in _str]
+        return [_CHAR_MAP.index(char) for char in _str]
+
+    @staticmethod
+    def transcribe_from_prediction(prediction):
+        transcribed_text = ""
+        previous_char = ""
+        for i in prediction.values:
+            char = _CHAR_MAP[i]
+            if char != previous_char:
+                transcribed_text += char
+            previous_char = char
+        return transcribed_text
 
     def get_num_batches(self, dataset):
         return len(dataset) // self.batch_size
@@ -249,7 +260,8 @@ class AcousticModel(object):
                       self.input_seq_lengths.name: np.array(input_seq_lengths)}
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed)
-        return outputs[0]
+        transcribed_text = self.transcribe_from_prediction(outputs[0])
+        return transcribed_text
 
     def run_checkpoint(self, sess, checkpoint_dir, num_test_batches, dequeue_op):
         # Save the model

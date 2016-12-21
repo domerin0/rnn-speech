@@ -20,8 +20,10 @@ def main():
 
     if prog_params['train'] is True:
         train_rnn(audio_processor, hyper_params, prog_params)
-    else:
+    elif prog_params['file'] is not None:
         process_file(audio_processor, hyper_params, prog_params['file'])
+    elif prog_params['record'] is True:
+        record_and_write(audio_processor, hyper_params)
 
 
 def train_rnn(audio_processor, hyper_params, prog_params):
@@ -78,15 +80,7 @@ def process_file(audio_processor, hyper_params, file):
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
-        prediction = model.process_input(sess, feat_vec, [original_feat_vec_length])
-        transcribed_text = ""
-        previous_char = ""
-        for i in prediction.values:
-            char = "abcdefghijklmnopqrstuvwxyz .'-_"[i]
-            if char != previous_char:
-                transcribed_text += char
-            previous_char = char
-
+        transcribed_text = model.process_input(sess, feat_vec, [original_feat_vec_length])
         print(transcribed_text)
 
 
@@ -112,6 +106,32 @@ def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, 
     return model
 
 
+def record_and_write(audio_processor, hyper_params):
+    import pyaudio
+    import numpy as np
+    _CHUNK = hyper_params["max_input_seq_length"]
+    _SR = 22050
+    p = pyaudio.PyAudio()
+
+    with tf.Session() as sess:
+        # create model
+        print("Building model... (this takes a while)")
+        model = create_acoustic_model(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None,
+                                      tb_run_name=None, timeline_enabled=False)
+        # Create stream of listening
+        stream = p.open(format=pyaudio.paInt16, channels=1, rate=_SR, input=True, frames_per_buffer=_CHUNK)
+        print("NOW RECORDING...")
+
+        while True:
+            data = stream.read(_CHUNK)
+            data = np.fromstring(data)
+            feat_vec, original_feat_vec_length = audio_processor.extract_mfcc(data, _SR)
+            (a, b) = feat_vec.shape
+            feat_vec = feat_vec.reshape((a, 1, b))
+            result = model.process_input(sess, feat_vec, [original_feat_vec_length])
+            print(result, end="")
+
+
 def parse_args():
     """
     Parses the command line input.
@@ -135,13 +155,16 @@ def parse_args():
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.set_defaults(train=False)
+    group.set_defaults(file=None)
+    group.set_defaults(record=False)
     group.add_argument('--train', dest='train', action='store_true', help='Train the network')
     group.add_argument('--file', type=str, help='Path to a wav file to process')
+    group.add_argument('--record', dest='record', action='store_true', help='Record and write result on the fly')
 
     args = parser.parse_args()
     prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'max_epoch': args.max_epoch,
                    'learn_rate': args.learn_rate, 'timeline': args.timeline, 'train': args.train,
-                   'file': args.file}
+                   'file': args.file, 'record': args.record}
     return prog_params
 
 
