@@ -281,16 +281,18 @@ class AcousticModel(object):
             sys.stdout.flush()
 
     def enqueue_data(self, coord, sess, t_local_data, enqueue_op, dataset,
-                     mfcc_input, mfcc_input_length, label, label_length):
-        t_local_data.dataset = []
+                     mfcc_input, mfcc_input_length, label, label_length, start_from=0):
+        # Make a local copy of the dataset and set the reading index
+        t_local_data.dataset = dataset[:]
+        t_local_data.current_pos = start_from
 
         while not coord.should_stop():
-            if len(t_local_data.dataset) == 0:
-                # Update the local copy of the dataset
-                t_local_data.dataset = dataset[:]
+            if t_local_data.current_pos >= len(t_local_data.dataset):
+                t_local_data.current_pos = 0
 
-            # Take the first item in the list
-            [t_local_data.file, t_local_data.text, _] = t_local_data.dataset.pop(0)
+            # Take an item in the list and increase position
+            [t_local_data.file, t_local_data.text, _] = t_local_data.dataset[t_local_data.current_pos]
+            t_local_data.current_pos += 1
 
             # Calculate MFCC
             self.lock.acquire()
@@ -381,11 +383,16 @@ class AcousticModel(object):
         test_enqueue_op = test_queue.enqueue([test_mfcc_input, test_mfcc_input_length, test_label, test_label_length])
         test_dequeue_op = test_queue.dequeue_many(self.batch_size)
 
+        # Calculate approximate position for learning batch, allow to keep consistency between multiple iterations
+        # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
+        start_from = self.global_step.eval() * self.batch_size
+        print("Start training from file number : ", start_from)
+
         # Create the threads
         thread_local_data = threading.local()
         threads = [threading.Thread(name="train_enqueue", target=self.enqueue_data,
                                     args=(coord, sess, thread_local_data, train_enqueue_op, train_set, train_mfcc_input,
-                                          train_mfcc_input_length, train_label, train_label_length)),
+                                          train_mfcc_input_length, train_label, train_label_length, start_from)),
                    threading.Thread(name="test_enqueue", target=self.enqueue_data,
                                     args=(coord, sess, thread_local_data, test_enqueue_op, test_set, test_mfcc_input,
                                           test_mfcc_input_length, test_label, test_label_length))
