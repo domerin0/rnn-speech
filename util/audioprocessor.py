@@ -2,6 +2,7 @@
 import numpy as np
 import subprocess
 import librosa
+import logging
 
 
 class AudioProcessor(object):
@@ -40,6 +41,6 @@ class AudioProcessor(object):
         try:
             subprocess.call("sox {0} {1} trim {2} ={3}".format(sph_file, wav_file, start, end))
         except OSError as e:
-            print("Execution failed:", e)
+            logging.warning("Execution failed : %s", e)
             return False
         return True

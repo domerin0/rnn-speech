@@ -6,6 +6,7 @@ of hyperparameters (for use in checkpoint restoration and sampling)
 import os
 import pickle
 import time
+import logging
 try:
     import ConfigParser as configparser
 except ImportError:
@@ -19,8 +20,13 @@ class HyperParameterHandler(object):
         """
         self.hyper_params = self.readConfigFile(config_file)
 
-        print("Using checkpoint {0}".format(self.hyper_params["checkpoint_dir"]))
-        print("Using hyper params: {0}".format(self.hyper_params))
+        # Set logging framework
+        if self.hyper_params["log_file"] is not None:
+            logging.basicConfig(filename=self.hyper_params["log_file"])
+        logging.getLogger().setLevel(self.hyper_params["log_level"])
+
+        logging.info("Using checkpoint %s", self.hyper_params["checkpoint_dir"])
+        logging.debug("Using hyper params: %s", self.hyper_params)
 
         # Create checkpoint dir if needed
         if not os.path.exists(self.hyper_params["checkpoint_dir"]):
@@ -31,7 +37,7 @@ class HyperParameterHandler(object):
             if self.checkChanged(self.hyper_params):
                 if not self.hyper_params["use_config_file_if_checkpoint_exists"]:
                     self.hyper_params = self.getParams()
-                    print("Restoring hyper params from previous checkpoint...")
+                    logging.info("Restoring hyper params from previous checkpoint...")
                 else:
                     new_checkpoint_dir = "{0}_hidden_size_{1}_numlayers_{2}_dropout_{3}".format(
                         int(time.time()),
@@ -45,10 +51,10 @@ class HyperParameterHandler(object):
                     self.file_path = os.path.join(self.hyper_params["checkpoint_dir"], "hyperparams.p")
                     self.saveParams(self.hyper_params)
             else:
-                print("No hyper parameter changed detected, using old checkpoint...")
+                logging.info("No hyper parameter changed detected, using old checkpoint...")
         else:
             self.saveParams(self.hyper_params)
-            print("No hyper params detected at checkpoint... reading config file")
+            logging.info("No hyper params detected at checkpoint... reading config file")
         return
 
     def getHyperParams(self):
@@ -88,6 +94,7 @@ class HyperParameterHandler(object):
         acoustic_section = "acoustic_network_params"
         general_section = "general"
         training_section = "training"
+        log_section = "logging"
         dic["num_layers"] = config.getint(acoustic_section, "num_layers")
         dic["hidden_size"] = config.getint(acoustic_section, "hidden_size")
         dic["dropout"] = config.getfloat(acoustic_section, "dropout")
@@ -107,5 +114,10 @@ class HyperParameterHandler(object):
         dic["tensorboard_dir"] = config.get(training_section, "tensorboard_dir", fallback=None)
         if dic["tensorboard_dir"] is not None and not os.path.exists(dic["tensorboard_dir"]):
             dic["tensorboard_dir"] = None
+        dic["log_file"] = config.get(log_section, "log_file", fallback=None)
+        log_level = config.get(log_section, "log_level", fallback='WARNING')
+        dic["log_level"] = getattr(logging, log_level)
+        if not isinstance(dic["log_level"], int):
+            raise ValueError('Invalid log level: %s' % log_level)
 
         return dic

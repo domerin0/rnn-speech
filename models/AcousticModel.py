@@ -17,6 +17,7 @@ import sys
 import os
 from datetime import datetime
 import threading
+import logging
 
 _CHAR_MAP = "abcdefghijklmnopqrstuvwxyz .'-_"
 
@@ -56,7 +57,7 @@ class AcousticModel(object):
         self.dropout = dropout
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False, name='learning_rate')
-        tf.summary.scalar('Learning rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
+        tf.summary.scalar('Learning_rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
         self.learning_rate_decay_op = self.learning_rate.assign(learning_rate * lr_decay_factor)
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.dropout = dropout
@@ -243,7 +244,7 @@ class AcousticModel(object):
                 tl = timeline.Timeline(run_metadata.step_stats)
                 ctf = tl.generate_chrome_trace_format()
                 with open(self.tensorboard_dir + '/' + 'timeline.json', 'w') as f:
-                    print("writing to timeline.json")
+                    logging.info("Writing to timeline.json")
                     f.write(ctf)
 
         return outputs[0]
@@ -267,17 +268,17 @@ class AcousticModel(object):
 
         # Run a test set against the current model
         if num_test_batches > 0:
-            print(num_test_batches)
+            logging.info("Test set - Will proceed to %d iterations", num_test_batches)
             mean_loss = 0.0
             for i in range(num_test_batches):
-                print("On {0}th training iteration".format(i))
+                logging.debug("On %dth iteration of the test set", i)
                 input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch = \
                     self.dequeue_data(sess, dequeue_op)
 
                 step_loss = self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
                                       label_indices_batch, forward_only=True)
                 mean_loss = step_loss / num_test_batches
-            print("\tTest: loss %.2f" % mean_loss)
+            logging.info("Finished test set - resulting loss is %.2f", mean_loss)
             sys.stdout.flush()
 
     def enqueue_data(self, coord, sess, t_local_data, enqueue_op, dataset,
@@ -307,16 +308,15 @@ class AcousticModel(object):
                 t_local_data.label_data = self.get_str_labels(t_local_data.text)
             except ValueError:
                 # Incorrect label
-                print("Incorrect label for {0} ({1})".format(t_local_data.file, t_local_data.text))
+                logging.warning("Incorrect label for %s (%s)", t_local_data.file, t_local_data.text)
                 continue
             # Check sizes and pad if needed
             t_local_data.label_data_length = len(t_local_data.label_data)
             if (t_local_data.label_data_length > self.max_target_seq_length) or\
                     (t_local_data.original_mfcc_length > self.max_input_seq_length):
                 # If either input or output vector is too long we shouldn't take this sample
-                print("Warning - sample too long : {0}"
-                      "(input : {1} / text : {2})".format(t_local_data.file, t_local_data.original_mfcc_length,
-                                                          t_local_data.label_data_length))
+                logging.warning("Warning - sample too long : %s (input : %d / text : %s)",
+                                t_local_data.file, t_local_data.original_mfcc_length, t_local_data.label_data_length)
                 continue
             elif t_local_data.label_data_length < self.max_target_seq_length:
                 # Label need padding
@@ -386,7 +386,7 @@ class AcousticModel(object):
         # Calculate approximate position for learning batch, allow to keep consistency between multiple iterations
         # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
         start_from = self.global_step.eval() * self.batch_size
-        print("Start training from file number : ", start_from)
+        logging.info("Start training from file number : %d", start_from)
 
         # Create the threads
         thread_local_data = threading.local()
@@ -431,15 +431,15 @@ class AcousticModel(object):
                 no_improvement_since = 0
             previous_loss = step_loss
 
-            # Print step result
-            print("Step {0} with loss {1}".format(current_step, step_loss))
+            # Step result
+            logging.debug("Step %d with loss %.4f", current_step, step_loss)
             step_time += (time.time() - start_time) / steps_per_checkpoint
             mean_loss += step_loss / steps_per_checkpoint
 
             # Check if we are at a checkpoint
             if current_step % steps_per_checkpoint == 0:
-                print("Global step %d learning rate %.4f step-time %.2f loss %.2f" %
-                      (self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss))
+                logging.info("Global step %d / learning rate %.4f / step-time %.2f / loss %.2f",
+                             self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss)
                 num_test_batches = self.get_num_batches(test_set)
                 self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
                 step_time, mean_loss = 0.0, 0.0
