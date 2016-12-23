@@ -11,33 +11,55 @@ except ImportError:
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_path, data_type, audio_processor, size_ordering=False):
-        self.raw_data_path = raw_data_path
-        self.data_type = data_type
+    def __init__(self, raw_data_paths, audio_processor, size_ordering=False):
+        self.raw_data_paths = raw_data_paths.replace(" ", "").split(',')
         self.audio_processor = audio_processor
         self.size_ordering = size_ordering
 
     def run(self):
-        if self.data_type == "Shtooka":
-            data = self.get_data_shtooka(self.raw_data_path)
-        elif self.data_type == "Vystadial_2013":
-            data = self.get_data_vystadial_2013(self.raw_data_path)
-        elif self.data_type == "TEDLIUM":
-            data = self.get_data_tedlium(self.raw_data_path)
-        elif self.data_type == "LibriSpeech":
-            data = self.get_data_librispeech(self.raw_data_path)
-        else:
-            raise Exception("ERROR : unknown training_dataset_type")
+        data = []
+        for path in self.raw_data_paths:
+            data_type = self.get_type(path)
+            if data_type == "Shtooka":
+                data += self.get_data_shtooka(path)
+            elif data_type == "Vystadial_2013":
+                data += self.get_data_vystadial_2013(path)
+            elif data_type == "TEDLIUM":
+                data += self.get_data_tedlium(path)
+            elif data_type == "LibriSpeech":
+                data += self.get_data_librispeech(path)
+            else:
+                raise Exception("ERROR : unknown training_dataset_type")
 
         # Check that there is data
         if len(data) == 0:
-            raise Exception("ERROR : no data found in directory {0}".format(self.raw_data_path))
+            raise Exception("ERROR : no data found in directories {0}".format(self.raw_data_paths))
 
         # Order by size ascending if needed
         if self.size_ordering is True:
             data = sorted(data, key=lambda data: data[2])
 
         return data
+
+    @classmethod
+    def get_type(cls, raw_data_path):
+        # Check for ".trn" files
+        files = cls.find_files(raw_data_path, ".trn")
+        if files:
+            return "Vystadial_2013"
+        # Check for ".stm" files
+        files = cls.find_files(raw_data_path, ".stm")
+        if files:
+            return "TEDLIUM"
+        # Check for "index.tag.txt" files
+        files = cls.find_files(raw_data_path, "index.tags.txt")
+        if files:
+            return "Shtooka"
+        # Check for ".trans.txt" files
+        files = cls.find_files(raw_data_path, ".trans.txt")
+        if files:
+            return "LibriSpeech"
+        return "Unrecognized"
 
     @staticmethod
     def find_files(root_search_path, files_extension):

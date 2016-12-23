@@ -117,7 +117,7 @@ class AcousticModel(object):
                               name="output_w")
             b_o = tf.Variable(tf.zeros([num_labels]), name="output_b")
 
-        # compute logits
+        # Compute logits
         self.logits = tf.pack([tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
                                for i in tf.split(0, self.max_input_seq_length, rnn_output)])
 
@@ -129,9 +129,11 @@ class AcousticModel(object):
             # Sparse tensor for corrects labels input
             self.sparse_labels = tf.sparse_placeholder(tf.int32)
 
-            # compute ctc loss
+            # Compute ctc loss
             self.ctc_loss = tf.nn.ctc_loss(self.logits, self.sparse_labels, self.input_seq_lengths)
-            self.mean_loss = tf.reduce_mean(self.ctc_loss)
+            # Compute mean loss : only to check on progression in learning
+            # The loss is averaged accross the batch but before we take into account the real size of the label
+            self.mean_loss = tf.reduce_mean(tf.truediv(self.ctc_loss, tf.to_float(self.input_seq_lengths)))
             with tf.name_scope('Mean_loss'):
                 tf.summary.scalar('Training', self.mean_loss, collections=[graphkey_training])
                 tf.summary.scalar('Test', self.mean_loss, collections=[graphkey_test])
@@ -301,7 +303,7 @@ class AcousticModel(object):
             # Convert string to numbers
             try:
                 t_local_data.label_data = self.get_str_labels(t_local_data.text)
-            except:
+            except ValueError:
                 # Incorrect label
                 print("Incorrect label for {0} ({1})".format(t_local_data.file, t_local_data.text))
                 continue

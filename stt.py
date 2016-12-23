@@ -28,14 +28,12 @@ def main():
 
 def train_rnn(audio_processor, hyper_params, prog_params):
     # Load the train set data
-    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dir"],
-                                                 hyper_params["training_dataset_type"],
+    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"],
                                                  audio_processor, size_ordering=True)
     train_set = data_processor.run()
-    if (hyper_params["test_dataset_dir"] is not None) and (hyper_params["test_dataset_type"] is not None):
+    if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
-        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dir"],
-                                                     hyper_params["test_dataset_type"],
+        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"],
                                                      audio_processor, size_ordering=True)
         test_set = data_processor.run()
     elif hyper_params["train_frac"] is not None:
