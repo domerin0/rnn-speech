@@ -17,7 +17,8 @@ def main():
     prog_params = parse_args()
     serializer = hyperparams.HyperParameterHandler(prog_params['config_file'])
     hyper_params = serializer.getHyperParams()
-    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"])
+    audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
+                                                    hyper_params["signal_processing"])
 
     if prog_params['train'] is True:
         train_rnn(audio_processor, hyper_params, prog_params)
