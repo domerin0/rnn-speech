@@ -6,8 +6,20 @@ import logging
 
 
 class AudioProcessor(object):
-    def __init__(self, max_input_seq_length):
+    def __init__(self, max_input_seq_length, feature_type="mfcc"):
+        '''
+        feature_type - string options are: mfcc, fbank
+        mfcc is a 20-dim input 
+        fbank is 120-dim input (mel filterbank with delta and double delta)
+        '''
         self.max_input_seq_length = max_input_seq_length
+        if feature_type == "mfcc":
+            self.extraction_f = self.extract_mfcc
+        elif feature_type == "fbank":
+            self.extraction_f = self.extract_fbank
+        else:
+            raise ValueError("{0} is not a valid extraction function, \
+            only fbank and mfcc are accepted.".format(feature_type))
 
     def process_audio_file(self, file_name):
         """
@@ -15,7 +27,7 @@ class AudioProcessor(object):
         Returns padded feature tensor and original length
         """
         sig, sr = librosa.load(file_name, mono=True)
-        return self.extract_mfcc(sig, sr)
+        return self.extraction_f(sig, sr)
 
     def extract_mfcc(self, sig, sr):
         # mfcc
