@@ -6,7 +6,7 @@ Character level speech recognizer using ctc loss with deep rnns in TensorFlow.
 This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the
 [paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level
 using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language
-model. The acoustic model reads in log mel frequency filterbank feature vectors (40-dim inputs).
+model. The acoustic model can read in either mel frequency cepstral coefficient, or mel filterbank with delta and double delta feature vectors (40 or 120 dim inputs respectively).
 
 The audio signal processing is done using [librosa](https://github.com/librosa/librosa).
 
