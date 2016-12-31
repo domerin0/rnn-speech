@@ -104,6 +104,7 @@ class HyperParameterHandler(object):
         dic["grad_clip"] = config.getint(acoustic_section, "grad_clip")
         dic["use_config_file_if_checkpoint_exists"] = config.getboolean(general_section,
                                                                         "use_config_file_if_checkpoint_exists")
+        dic["signal_processing"] = config.get(acoustic_section, "signal_processing")
         dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
         dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
         dic["training_dataset_dirs"] = config.get(training_section, "training_dataset_dirs")
