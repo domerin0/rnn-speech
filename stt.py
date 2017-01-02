@@ -19,6 +19,8 @@ def main():
     hyper_params = serializer.getHyperParams()
     audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
                                                     hyper_params["signal_processing"])
+    # Get the input dimension for the RNN, depend on the chosen signal processing mode
+    hyper_params["input_dim"] = audio_processor.feature_size
 
     if prog_params['train'] is True:
         train_rnn(audio_processor, hyper_params, prog_params)
@@ -61,7 +63,7 @@ def train_rnn(audio_processor, hyper_params, prog_params):
             sess.run(assign_op)
 
         logging.info("Start training...")
-        model.train(sess, test_set, train_set, hyper_params["steps_per_checkpoint"],
+        model.train(sess, audio_processor, test_set, train_set, hyper_params["steps_per_checkpoint"],
                     hyper_params["checkpoint_dir"], max_epoch=prog_params["max_epoch"])
 
 
@@ -85,13 +87,12 @@ def process_file(audio_processor, hyper_params, file):
 def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None,
                           tb_run_name=None, timeline_enabled=False):
     num_labels = 31
-    input_dim = 20
     logging.info("Building model... (this takes a while)")
     model = AcousticModel(session, num_labels, hyper_params["num_layers"], hyper_params["hidden_size"],
                           hyper_params["dropout"], batch_size, hyper_params["learning_rate"],
                           hyper_params["lr_decay_factor"], hyper_params["grad_clip"],
                           hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
-                          input_dim, forward_only=forward_only, tensorboard_dir=tensorboard_dir,
+                          hyper_params["input_dim"], forward_only=forward_only, tensorboard_dir=tensorboard_dir,
                           tb_run_name=tb_run_name, timeline_enabled=timeline_enabled)
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     # Initialize variables

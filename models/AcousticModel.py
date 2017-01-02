@@ -67,9 +67,6 @@ class AcousticModel(object):
         self.timeline_enabled = timeline_enabled
         self.input_dim = input_dim
 
-        # Initialize audio_processor
-        self.audio_processor = audioprocessor.AudioProcessor(max_input_seq_length)
-
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
                                      shape=[self.max_input_seq_length, None, self.input_dim],
@@ -281,7 +278,7 @@ class AcousticModel(object):
             logging.info("Finished test set - resulting loss is %.2f", mean_loss)
             sys.stdout.flush()
 
-    def enqueue_data(self, coord, sess, t_local_data, enqueue_op, dataset,
+    def enqueue_data(self, coord, sess, audio_processor, t_local_data, enqueue_op, dataset,
                      mfcc_input, mfcc_input_length, label, label_length, start_from=0):
         # Make a local copy of the dataset and set the reading index
         t_local_data.dataset = dataset[:]
@@ -299,7 +296,9 @@ class AcousticModel(object):
             self.lock.acquire()
             try:
                 t_local_data.mfcc_data, t_local_data.original_mfcc_length =\
-                    self.audio_processor.process_audio_file(t_local_data.file)
+                    audio_processor.process_audio_file(t_local_data.file)
+                logging.debug("File %s processed, resulting a array of shape %s - original signal size is %d",
+                              t_local_data.file, t_local_data.mfcc_data.shape, t_local_data.original_mfcc_length)
             finally:
                 self.lock.release()
 
@@ -350,7 +349,7 @@ class AcousticModel(object):
 
         return input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch
 
-    def train(self, sess, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
+    def train(self, sess, audio_processor, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
         # Create a queue for each dataset and a coordinator
         # Shuffle queue for the train set, but we don't shuffle too much in order to keep the benefit from
         # having homogeneous sizes in a given batch (files are ordered by size ascending)
@@ -391,11 +390,12 @@ class AcousticModel(object):
         # Create the threads
         thread_local_data = threading.local()
         threads = [threading.Thread(name="train_enqueue", target=self.enqueue_data,
-                                    args=(coord, sess, thread_local_data, train_enqueue_op, train_set, train_mfcc_input,
-                                          train_mfcc_input_length, train_label, train_label_length, start_from)),
+                                    args=(coord, sess, audio_processor, thread_local_data, train_enqueue_op, train_set,
+                                          train_mfcc_input, train_mfcc_input_length, train_label, train_label_length,
+                                          start_from)),
                    threading.Thread(name="test_enqueue", target=self.enqueue_data,
-                                    args=(coord, sess, thread_local_data, test_enqueue_op, test_set, test_mfcc_input,
-                                          test_mfcc_input_length, test_label, test_label_length))
+                                    args=(coord, sess, audio_processor, thread_local_data, test_enqueue_op, test_set,
+                                          test_mfcc_input, test_mfcc_input_length, test_label, test_label_length))
                    ]
         for t in threads:
             t.start()
@@ -432,7 +432,7 @@ class AcousticModel(object):
             previous_loss = step_loss
 
             # Step result
-            logging.debug("Step %d with loss %.4f", current_step, step_loss)
+            logging.info("Step %d with loss %.4f", current_step, step_loss)
             step_time += (time.time() - start_time) / steps_per_checkpoint
             mean_loss += step_loss / steps_per_checkpoint
 

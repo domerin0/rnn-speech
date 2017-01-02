@@ -15,8 +15,10 @@ class AudioProcessor(object):
         self.max_input_seq_length = max_input_seq_length
         if feature_type == "mfcc":
             self.extraction_f = self.extract_mfcc
+            self.feature_size = 20
         elif feature_type == "fbank":
             self.extraction_f = self.extract_fbank
+            self.feature_size = 120
         else:
             raise ValueError("{0} is not a valid extraction function, \
             only fbank and mfcc are accepted.".format(feature_type))
