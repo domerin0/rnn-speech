@@ -1,2 +1,2 @@
-model_checkpoint_path: "acousticmodel.ckpt-77000"
-all_model_checkpoint_paths: "acousticmodel.ckpt-77000"
+model_checkpoint_path: "acousticmodel.ckpt"
+all_model_checkpoint_paths: "acousticmodel.ckpt"
