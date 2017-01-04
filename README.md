@@ -11,7 +11,7 @@ model. The acoustic model can read in either mel frequency cepstral coefficient,
 The audio signal processing is done using [librosa](https://github.com/librosa/librosa).
 
 Currently only the acoustic model has been completed and it still lack a good trained example.
-One pre-trained example is available [here](trained_models/acoustic_model/english_Shtooka/README.md) and can be tried
+One pre-trained example is available [here](trained_models/acoustic_model/english) and can be tried
 on any file (your own recorded voice for example).
 
 The character-level language model is still in the works.
