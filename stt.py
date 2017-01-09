@@ -92,8 +92,8 @@ def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, 
                           hyper_params["dropout"], batch_size, hyper_params["learning_rate"],
                           hyper_params["lr_decay_factor"], hyper_params["grad_clip"],
                           hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
-                          hyper_params["input_dim"], forward_only=forward_only, tensorboard_dir=tensorboard_dir,
-                          tb_run_name=tb_run_name, timeline_enabled=timeline_enabled)
+                          hyper_params["input_dim"], hyper_params["batch_normalization"], forward_only=forward_only,
+                          tensorboard_dir=tensorboard_dir, tb_run_name=tb_run_name, timeline_enabled=timeline_enabled)
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     # Initialize variables
     session.run(tf.global_variables_initializer())

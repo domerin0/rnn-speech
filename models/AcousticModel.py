@@ -25,7 +25,7 @@ _CHAR_MAP = "abcdefghijklmnopqrstuvwxyz .'-_"
 class AcousticModel(object):
     def __init__(self, session, num_labels, num_layers, hidden_size, dropout,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
-                 max_input_seq_length, max_target_seq_length, input_dim,
+                 max_input_seq_length, max_target_seq_length, input_dim, normalization,
                  forward_only=False, tensorboard_dir=None, tb_run_name=None,
                  timeline_enabled=False):
         """
@@ -43,8 +43,11 @@ class AcousticModel(object):
         max_input_seq_length - maximum length of input vector sequence
         max_target_seq_length - maximum length of ouput vector sequence
         input_dim - dimension of input vector
+        normalization - boolean indicating whether or not to normalize data in a input batch
         forward_only - whether to build back prop nodes or not
         tensorboard_dir - path to tensorboard file (None if not activated)
+        tb_run_name - directory name for the tensorboard files (inside tensorboard_dir, None mean no sub-directory)
+        timeline_enabled - enable the output of a trace file for timeline visualization
         """
         # Initialize thread management
         self.lock = threading.Lock()
@@ -66,6 +69,7 @@ class AcousticModel(object):
         self.tensorboard_dir = tensorboard_dir
         self.timeline_enabled = timeline_enabled
         self.input_dim = input_dim
+        self.epsilon = 1e-3
 
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
@@ -98,16 +102,23 @@ class AcousticModel(object):
         # make rnn inputs
         inputs = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_i) + b_i
                   for i in tf.split(0, self.max_input_seq_length, self.inputs)]
+        # Switch from a list to a tensor
+        inputs = tf.pack(inputs)
+
+        # If we are in training then add a batch normalization layer to the model
+        if normalization and not forward_only:
+            # Note : the tensor is [time, batch_size, input vector] so we go against dim 1
+            batch_mean, batch_var = tf.nn.moments(inputs, [1], shift=None, name="moments", keep_dims=True)
+            inputs = tf.nn.batch_normalization(inputs, batch_mean, batch_var, None, None,
+                                               self.epsilon, name="batch_norm")
 
         # set rnn init state to 0s
         init_state = cell.zero_state(self.batch_size, tf.float32)
 
         # build rnn
         with tf.name_scope('Dynamic_rnn'):
-            rnn_output, self.hidden_state = tf.nn.dynamic_rnn(cell, tf.pack(inputs),
-                                                              sequence_length=self.input_seq_lengths,
-                                                              initial_state=init_state,
-                                                              time_major=True, parallel_iterations=1000)
+            rnn_output, self.hidden_state = tf.nn.dynamic_rnn(cell, inputs, sequence_length=self.input_seq_lengths,
+                                                              initial_state=init_state, time_major=True)
 
         # build output layer
         with tf.name_scope('Output_layer'):

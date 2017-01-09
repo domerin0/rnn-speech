@@ -102,9 +102,9 @@ class HyperParameterHandler(object):
         dic["learning_rate"] = config.getfloat(acoustic_section, "learning_rate")
         dic["lr_decay_factor"] = config.getfloat(acoustic_section, "lr_decay_factor")
         dic["grad_clip"] = config.getint(acoustic_section, "grad_clip")
+        dic["signal_processing"] = config.get(acoustic_section, "signal_processing")
         dic["use_config_file_if_checkpoint_exists"] = config.getboolean(general_section,
                                                                         "use_config_file_if_checkpoint_exists")
-        dic["signal_processing"] = config.get(acoustic_section, "signal_processing")
         dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
         dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
         dic["training_dataset_dirs"] = config.get(training_section, "training_dataset_dirs")
@@ -115,6 +115,7 @@ class HyperParameterHandler(object):
         dic["tensorboard_dir"] = config.get(training_section, "tensorboard_dir", fallback=None)
         if dic["tensorboard_dir"] is not None and not os.path.exists(dic["tensorboard_dir"]):
             dic["tensorboard_dir"] = None
+        dic["batch_normalization"] = config.getboolean(training_section, "batch_normalization", fallback=False)
         dic["log_file"] = config.get(log_section, "log_file", fallback=None)
         log_level = config.get(log_section, "log_level", fallback='WARNING')
         dic["log_level"] = getattr(logging, log_level)
