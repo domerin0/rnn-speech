@@ -275,9 +275,9 @@ class AcousticModel(object):
         self.saver.save(sess, checkpoint_path, global_step=self.global_step)
 
         # Run a test set against the current model
+        mean_loss = 0.0
         if num_test_batches > 0:
             logging.info("Test set - Will proceed to %d iterations", num_test_batches)
-            mean_loss = 0.0
             for i in range(num_test_batches):
                 logging.debug("On %dth iteration of the test set", i)
                 input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch = \
@@ -287,7 +287,7 @@ class AcousticModel(object):
                                       label_indices_batch, forward_only=True)
                 mean_loss = step_loss / num_test_batches
             logging.info("Finished test set - resulting loss is %.2f", mean_loss)
-            sys.stdout.flush()
+        return mean_loss
 
     def enqueue_data(self, coord, sess, audio_processor, t_local_data, enqueue_op, dataset,
                      mfcc_input, mfcc_input_length, label, label_length, start_from=0):
@@ -411,7 +411,7 @@ class AcousticModel(object):
         for t in threads:
             t.start()
 
-        previous_loss = 0
+        previous_loss = None
         no_improvement_since = 0
         step_time, mean_loss = 0.0, 0.0
         current_step = 1
@@ -429,19 +429,6 @@ class AcousticModel(object):
             step_loss = self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
                                   label_indices_batch, forward_only=False)
 
-            # Decrease learning rate if no improvement was seen over last 6 steps
-            if step_loss >= previous_loss:
-                no_improvement_since += 1
-                if no_improvement_since == 6:
-                    sess.run(self.learning_rate_decay_op)
-                    no_improvement_since = 0
-                    if self.learning_rate.eval() < 1e-7:
-                        # End learning process
-                        break
-            else:
-                no_improvement_since = 0
-            previous_loss = step_loss
-
             # Step result
             logging.info("Step %d with loss %.4f", current_step, step_loss)
             step_time += (time.time() - start_time) / steps_per_checkpoint
@@ -452,8 +439,21 @@ class AcousticModel(object):
                 logging.info("Global step %d / learning rate %.4f / step-time %.2f / loss %.2f",
                              self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss)
                 num_test_batches = self.get_num_batches(test_set)
-                self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
+                chkpt_loss = self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
                 step_time, mean_loss = 0.0, 0.0
+
+                # Decrease learning rate if the model is not improving
+                if (previous_loss is not None) and (chkpt_loss >= previous_loss):
+                    no_improvement_since += 1
+                    if no_improvement_since == 4:
+                        sess.run(self.learning_rate_decay_op)
+                        no_improvement_since = 0
+                        if self.learning_rate.eval() < 1e-7:
+                            # End learning process
+                            break
+                else:
+                    no_improvement_since = 0
+                previous_loss = chkpt_loss
 
             current_step += 1
             if (max_epoch is not None) and (current_step > max_epoch):
