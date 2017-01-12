@@ -23,7 +23,7 @@ _CHAR_MAP = "abcdefghijklmnopqrstuvwxyz .'-_"
 
 
 class AcousticModel(object):
-    def __init__(self, session, num_labels, num_layers, hidden_size, dropout,
+    def __init__(self, session, num_labels, num_layers, hidden_size, input_keep_prob, output_keep_prob,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
                  max_input_seq_length, max_target_seq_length, input_dim, normalization,
                  forward_only=False, tensorboard_dir=None, tb_run_name=None,
@@ -35,7 +35,8 @@ class AcousticModel(object):
         num_labels - dimension of character input/one hot encoding
         num_layers - number of lstm layers
         hidden_size - size of hidden layers
-        dropout - probability of dropping hidden weights
+        input_keep_prob - probability of keeping input signal for a cell during training
+        output_keep_prob - probability of keeping output signal from a cell during training
         batch_size - number of training examples fed at once
         learning_rate - learning rate parameter fed to optimizer
         lr_decay_factor - decay factor of the learning rate
@@ -57,13 +58,13 @@ class AcousticModel(object):
         graphkey_test = tf.GraphKeys()
 
         # Store model variables
-        self.dropout = dropout
+        self.input_keep_prob = input_keep_prob
+        self.output_keep_prob = output_keep_prob
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False, name='learning_rate')
         tf.summary.scalar('Learning_rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
         self.learning_rate_decay_op = self.learning_rate.assign(learning_rate * lr_decay_factor)
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
-        self.dropout = dropout
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
         self.tensorboard_dir = tensorboard_dir
@@ -83,12 +84,15 @@ class AcousticModel(object):
 
         # Define a dropout layer (used only when training)
         with tf.name_scope('dropout'):
-            self.dropout_ph = tf.placeholder(tf.float32)
+            # Create placeholders, used to override values when running on the test set
+            self.input_keep_prob_ph = tf.placeholder(tf.float32)
+            self.output_keep_prob_ph = tf.placeholder(tf.float32)
             if not forward_only:
                 # If we are in training then add a dropoutWrapper to the cells
-                tf.summary.scalar('dropout_keep_probability', self.dropout_ph)
-                cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=self.dropout_ph,
-                                                     output_keep_prob=self.dropout_ph)
+                tf.summary.scalar('input_keep_prob', self.input_keep_prob_ph, collections=[graphkey_training])
+                tf.summary.scalar('output_keep_prob', self.output_keep_prob_ph, collections=[graphkey_training])
+                cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=self.input_keep_prob_ph,
+                                                     output_keep_prob=self.output_keep_prob_ph)
 
         if num_layers > 1:
             cell = tf.nn.rnn_cell.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
@@ -231,12 +235,14 @@ class AcousticModel(object):
 
         if forward_only is True:
             # If not in training then no need to apply a dropout, set the keep probability to 1.0
-            input_feed[self.dropout_ph] = 1.0
+            input_feed[self.input_keep_prob_ph] = 1.0
+            input_feed[self.output_keep_prob_ph] = 1.0
         else:
             # If in training then add the update operation
             output_feed.append(self.update)
-            # and feed the dropout layer a keep probability value
-            input_feed[self.dropout_ph] = self.dropout
+            # and feed the dropout layer the keep probability values
+            input_feed[self.input_keep_prob_ph] = self.input_keep_prob
+            input_feed[self.output_keep_prob_ph] = self.output_keep_prob
 
         # Actually run the tensorflow session
         outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
@@ -262,7 +268,7 @@ class AcousticModel(object):
         Returns:
           Translated text
         """
-        input_feed = {self.dropout_ph: 1.0, self.inputs.name: np.array(inputs),
+        input_feed = {self.input_keep_prob_ph: 1.0, self.output_keep_prob_ph: 1.0, self.inputs.name: np.array(inputs),
                       self.input_seq_lengths.name: np.array(input_seq_lengths)}
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed)

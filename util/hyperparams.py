@@ -97,7 +97,8 @@ class HyperParameterHandler(object):
         log_section = "logging"
         dic["num_layers"] = config.getint(acoustic_section, "num_layers")
         dic["hidden_size"] = config.getint(acoustic_section, "hidden_size")
-        dic["dropout"] = config.getfloat(acoustic_section, "dropout")
+        dic["dropout_input_keep_prob"] = config.getfloat(acoustic_section, "dropout_input_keep_prob")
+        dic["dropout_output_keep_prob"] = config.getfloat(acoustic_section, "dropout_output_keep_prob")
         dic["batch_size"] = config.getint(acoustic_section, "batch_size")
         dic["learning_rate"] = config.getfloat(acoustic_section, "learning_rate")
         dic["lr_decay_factor"] = config.getfloat(acoustic_section, "lr_decay_factor")
