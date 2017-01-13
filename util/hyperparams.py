@@ -79,7 +79,7 @@ class HyperParameterHandler(object):
             old_params = self.getParams()
             return old_params["num_layers"] != new_params["num_layers"] or\
                 old_params["hidden_size"] != new_params["hidden_size"] or\
-                old_params["dropout"] != new_params["dropout"]
+                old_params["signal_processing"] != new_params["signal_processing"]
         else:
             return False
 
