@@ -4,6 +4,7 @@ Reads in audio and text data, transforming it for input into the neural nets
 It will extract the dataset.
 """
 import os
+from random import shuffle
 try:
     import ConfigParser as configparser
 except ImportError:
@@ -38,6 +39,8 @@ class DataProcessor(object):
         # Order by size ascending if needed
         if self.size_ordering is True:
             data = sorted(data, key=lambda data: data[2])
+        else:
+            shuffle(data)
 
         return data
 

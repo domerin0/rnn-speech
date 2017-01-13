@@ -16,7 +16,7 @@ import logging
 def main():
     prog_params = parse_args()
     serializer = hyperparams.HyperParameterHandler(prog_params['config_file'])
-    hyper_params = serializer.getHyperParams()
+    hyper_params = serializer.get_hyper_params()
     audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
                                                     hyper_params["signal_processing"])
     # Get the input dimension for the RNN, depend on the chosen signal processing mode
@@ -28,17 +28,19 @@ def main():
         process_file(audio_processor, hyper_params, prog_params['file'])
     elif prog_params['record'] is True:
         record_and_write(audio_processor, hyper_params)
+    elif prog_params['evaluate'] is True:
+        evaluate(audio_processor, hyper_params)
 
 
 def train_rnn(audio_processor, hyper_params, prog_params):
     # Load the train set data
-    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"],
-                                                 audio_processor, size_ordering=True)
+    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"], audio_processor,
+                                                 size_ordering=hyper_params["dataset_size_ordering"])
     train_set = data_processor.run()
     if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
-        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"],
-                                                     audio_processor, size_ordering=True)
+        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor,
+                                                     size_ordering=hyper_params["dataset_size_ordering"])
         test_set = data_processor.run()
     elif hyper_params["train_frac"] is not None:
         # Or use a fraction of the train set for the test set
@@ -82,6 +84,46 @@ def process_file(audio_processor, hyper_params, file):
         feat_vec = feat_vec.reshape((a, 1, b))
         transcribed_text = model.process_input(sess, feat_vec, [original_feat_vec_length])
         print(transcribed_text)
+
+
+def evaluate(audio_processor, hyper_params):
+    if hyper_params["test_dataset_dirs"] is None:
+        logging.fatal("Setting test_dataset_dirs in config file is mandatory for evaluation mode")
+        return
+
+    # Load the test set data
+    data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor,
+                                                 size_ordering=hyper_params["dataset_size_ordering"])
+    test_set = data_processor.run()
+
+    logging.info("Using %d size of test set", len(test_set))
+
+    if len(test_set) == 0:
+        logging.fatal("No files in test set during an evaluation mode")
+        return
+
+    with tf.Session() as sess:
+        # create model
+        model = create_acoustic_model(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None,
+                                      tb_run_name=None, timeline_enabled=False)
+
+        wer_list = []
+        for file, label, _ in test_set:
+            feat_vec, original_feat_vec_length = audio_processor.process_audio_file(file)
+            label_data_length = len(label)
+            if (label_data_length > hyper_params["max_target_seq_length"]) or\
+               (original_feat_vec_length > hyper_params["max_input_seq_length"]):
+                logging.warning("Warning - sample too long : %s (input : %d / text : %s)",
+                                file, original_feat_vec_length, label_data_length)
+                continue
+
+            (a, b) = feat_vec.shape
+            feat_vec = feat_vec.reshape((a, 1, b))
+            transcribed_text = model.process_input(sess, feat_vec, [original_feat_vec_length])
+            wer_list.append(model.calculate_wer(transcribed_text.split(), label.split()) / float(len(label.split())))
+
+        print("Resulting WER : {0:.3g} %".format((sum(wer_list) * 100) / float(len(wer_list))))
+        return
 
 
 def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None,
@@ -157,14 +199,16 @@ def parse_args():
     group.set_defaults(train=False)
     group.set_defaults(file=None)
     group.set_defaults(record=False)
+    group.set_defaults(evaluate=False)
     group.add_argument('--train', dest='train', action='store_true', help='Train the network')
     group.add_argument('--file', type=str, help='Path to a wav file to process')
     group.add_argument('--record', dest='record', action='store_true', help='Record and write result on the fly')
+    group.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate WER against the test_set')
 
     args = parser.parse_args()
     prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'max_epoch': args.max_epoch,
                    'learn_rate': args.learn_rate, 'timeline': args.timeline, 'train': args.train,
-                   'file': args.file, 'record': args.record}
+                   'file': args.file, 'record': args.record, 'evaluate': args.evaluate}
     return prog_params
 
 

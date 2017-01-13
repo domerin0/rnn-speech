@@ -10,10 +10,8 @@ acoustic RNN trained with ctc loss
 """
 
 import tensorflow as tf
-import util.audioprocessor as audioprocessor
 import numpy as np
 import time
-import sys
 import os
 from datetime import datetime
 import threading
@@ -205,6 +203,57 @@ class AcousticModel(object):
             previous_char = char
         return transcribed_text
 
+    @staticmethod
+    def calculate_wer(r, h):
+        """
+        Source : https://martin-thoma.com/word-error-rate-calculation/
+
+        Calculation of WER with Levenshtein distance.
+
+        Works only for iterables up to 254 elements (uint8).
+        O(nm) time ans space complexity.
+
+        Parameters
+        ----------
+        r : list
+        h : list
+
+        Returns
+        -------
+        int
+
+        Examples
+        --------
+        > wer("who is there".split(), "is there".split())
+        1
+        > wer("who is there".split(), "".split())
+        3
+        > wer("".split(), "who is there".split())
+        3
+        """
+        # initialisation
+        d = np.zeros((len(r) + 1) * (len(h) + 1), dtype=np.uint8)
+        d = d.reshape((len(r) + 1, len(h) + 1))
+        for i in range(len(r) + 1):
+            for j in range(len(h) + 1):
+                if i == 0:
+                    d[0][j] = j
+                elif j == 0:
+                    d[i][0] = i
+
+        # computation
+        for i in range(1, len(r) + 1):
+            for j in range(1, len(h) + 1):
+                if r[i - 1] == h[j - 1]:
+                    d[i][j] = d[i - 1][j - 1]
+                else:
+                    substitution = d[i - 1][j - 1] + 1
+                    insertion = d[i][j - 1] + 1
+                    deletion = d[i - 1][j] + 1
+                    d[i][j] = min(substitution, insertion, deletion)
+
+        return d[len(r)][len(h)]
+
     def get_num_batches(self, dataset):
         return len(dataset) // self.batch_size
 
@@ -366,54 +415,53 @@ class AcousticModel(object):
 
         return input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch
 
+    def create_queue(self, sess, audio_processor, coord, dataset, queue_type):
+        start_from = 0
+        capacity = min(self.batch_size * 10, len(dataset))
+        if queue_type == 'train':
+            # Shuffle queue for the train set, but we don't shuffle too much in order to keep the benefit from
+            # having homogeneous sizes in a given batch (files are ordered by size ascending)
+            min_after_dequeue = min(self.batch_size * 7, len(dataset) - self.batch_size)
+            queue = tf.RandomShuffleQueue(capacity, min_after_dequeue, [tf.int32, tf.int32, tf.int32, tf.int32],
+                                          shapes=[[self.max_input_seq_length, self.input_dim], [],
+                                                  [self.max_target_seq_length], []])
+            # Calculate approximate position for learning batch, allow to keep consistency between multiple iterations
+            # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
+            start_from = self.global_step.eval() * self.batch_size
+            if start_from != 0:
+                logging.info("Start training from file number : %d", start_from)
+        elif queue_type == 'test':
+            # Simple FIFO queue for the test set because we don't care to test always in the same order
+            queue = tf.FIFOQueue(capacity, [tf.int32, tf.int32, tf.int32, tf.int32],
+                                 shapes=[[self.max_input_seq_length, self.input_dim], [],
+                                         [self.max_target_seq_length], []])
+        else:
+            raise ValueError("Invalid parameter 'queue_type' for method 'create_queue'")
+
+        # Define the enqueue operation for data
+        mfcc_input = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, self.input_dim],
+                                    name=queue_type + "_mfcc_input")
+        mfcc_input_length = tf.placeholder(tf.int32, shape=[],
+                                           name=queue_type + "_mfcc_input_length")
+        label = tf.placeholder(tf.int32, shape=[self.max_target_seq_length],
+                               name=queue_type + "_label")
+        label_length = tf.placeholder(tf.int32, shape=[],
+                                      name=queue_type + "_label_length")
+        enqueue_op = queue.enqueue([mfcc_input, mfcc_input_length, label, label_length])
+        dequeue_op = queue.dequeue_many(self.batch_size)
+        thread_local_data = threading.local()
+        thread = threading.Thread(name=queue_type + "_enqueue", target=self.enqueue_data,
+                                  args=(coord, sess, audio_processor, thread_local_data, enqueue_op, dataset,
+                                        mfcc_input, mfcc_input_length, label, label_length,
+                                        start_from))
+        return thread, dequeue_op
+
     def train(self, sess, audio_processor, test_set, train_set, steps_per_checkpoint, checkpoint_dir, max_epoch=None):
         # Create a queue for each dataset and a coordinator
-        # Shuffle queue for the train set, but we don't shuffle too much in order to keep the benefit from
-        # having homogeneous sizes in a given batch (files are ordered by size ascending)
-        capacity = min(self.batch_size * 10, len(train_set))
-        min_after_dequeue = min(self.batch_size * 7, len(train_set) - self.batch_size)
-        train_queue = tf.RandomShuffleQueue(capacity, min_after_dequeue, [tf.int32, tf.int32, tf.int32, tf.int32],
-                                            shapes=[[self.max_input_seq_length, self.input_dim], [],
-                                                    [self.max_target_seq_length], []])
-        # Simple FIFO queue for the test set because we don't care to test always in the same order
-        capacity = min(self.batch_size * 10, len(test_set))
-        test_queue = tf.FIFOQueue(capacity, [tf.int32, tf.int32, tf.int32, tf.int32],
-                                  shapes=[[self.max_input_seq_length, self.input_dim], [],
-                                          [self.max_target_seq_length], []])
         coord = tf.train.Coordinator()
-
-        # Define the enqueue operation for training data
-        train_mfcc_input = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, self.input_dim])
-        train_mfcc_input_length = tf.placeholder(tf.int32, shape=[])
-        train_label = tf.placeholder(tf.int32, shape=[self.max_target_seq_length])
-        train_label_length = tf.placeholder(tf.int32, shape=[])
-        train_enqueue_op = train_queue.enqueue([train_mfcc_input, train_mfcc_input_length,
-                                                train_label, train_label_length])
-        train_dequeue_op = train_queue.dequeue_many(self.batch_size)
-
-        # Define the enqueue operation for test data
-        test_mfcc_input = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, self.input_dim])
-        test_mfcc_input_length = tf.placeholder(tf.int32, shape=[])
-        test_label = tf.placeholder(tf.int32, shape=[self.max_target_seq_length])
-        test_label_length = tf.placeholder(tf.int32, shape=[])
-        test_enqueue_op = test_queue.enqueue([test_mfcc_input, test_mfcc_input_length, test_label, test_label_length])
-        test_dequeue_op = test_queue.dequeue_many(self.batch_size)
-
-        # Calculate approximate position for learning batch, allow to keep consistency between multiple iterations
-        # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
-        start_from = self.global_step.eval() * self.batch_size
-        logging.info("Start training from file number : %d", start_from)
-
-        # Create the threads
-        thread_local_data = threading.local()
-        threads = [threading.Thread(name="train_enqueue", target=self.enqueue_data,
-                                    args=(coord, sess, audio_processor, thread_local_data, train_enqueue_op, train_set,
-                                          train_mfcc_input, train_mfcc_input_length, train_label, train_label_length,
-                                          start_from)),
-                   threading.Thread(name="test_enqueue", target=self.enqueue_data,
-                                    args=(coord, sess, audio_processor, thread_local_data, test_enqueue_op, test_set,
-                                          test_mfcc_input, test_mfcc_input_length, test_label, test_label_length))
-                   ]
+        train_thread, train_dequeue_op = self.create_queue(sess, audio_processor, coord, train_set, 'train')
+        test_thread, test_dequeue_op = self.create_queue(sess, audio_processor, coord, test_set, 'test')
+        threads = [train_thread, test_thread]
         for t in threads:
             t.start()
 
@@ -448,18 +496,19 @@ class AcousticModel(object):
                 chkpt_loss = self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
                 step_time, mean_loss = 0.0, 0.0
 
-                # Decrease learning rate if the model is not improving
-                if (previous_loss is not None) and (chkpt_loss >= previous_loss):
-                    no_improvement_since += 1
-                    if no_improvement_since == 4:
-                        sess.run(self.learning_rate_decay_op)
+                if num_test_batches > 0:
+                    # Decrease learning rate if the model is not improving
+                    if (previous_loss is not None) and (chkpt_loss >= previous_loss):
+                        no_improvement_since += 1
+                        if no_improvement_since == 4:
+                            sess.run(self.learning_rate_decay_op)
+                            no_improvement_since = 0
+                            if self.learning_rate.eval() < 1e-7:
+                                # End learning process
+                                break
+                    else:
                         no_improvement_since = 0
-                        if self.learning_rate.eval() < 1e-7:
-                            # End learning process
-                            break
-                else:
-                    no_improvement_since = 0
-                previous_loss = chkpt_loss
+                    previous_loss = chkpt_loss
 
             current_step += 1
             if (max_epoch is not None) and (current_step > max_epoch):
