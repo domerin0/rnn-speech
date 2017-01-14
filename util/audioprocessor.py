@@ -125,7 +125,7 @@ class AudioProcessor(object):
     @staticmethod
     def extractWavFromSph(sph_file, wav_file, start, end):
         try:
-            subprocess.call("sox {0} {1} trim {2} ={3}".format(sph_file, wav_file, start, end))
+            subprocess.call(["sox", sph_file, wav_file, "trim", start, "={0}".format(end)])
         except OSError as e:
             logging.warning("Execution failed : %s", e)
             return False
