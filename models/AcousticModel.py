@@ -387,10 +387,15 @@ class AcousticModel(object):
                 # Label need padding
                 t_local_data.label_data += [0] * (self.max_target_seq_length - len(t_local_data.label_data))
 
-            sess.run(enqueue_op, feed_dict={mfcc_input: t_local_data.mfcc_data,
-                                            mfcc_input_length: t_local_data.original_mfcc_length,
-                                            label: t_local_data.label_data,
-                                            label_length: t_local_data.label_data_length})
+            try:
+                sess.run(enqueue_op, feed_dict={mfcc_input: t_local_data.mfcc_data,
+                                                mfcc_input_length: t_local_data.original_mfcc_length,
+                                                label: t_local_data.label_data,
+                                                label_length: t_local_data.label_data_length})
+            except Exception as e:
+                # The queue may have been cancelled so we should stop
+                coord.request_stop(e)
+                break
 
     @staticmethod
     def dequeue_data(sess, dequeue_op):
@@ -515,6 +520,9 @@ class AcousticModel(object):
                 # We have reached the maximum allowed, we should exit at the end of this run
                 break
 
+        # Stop the queues
+        sess.run(train_dequeue_op.close(cancel_pending_enqueues=True))
+        sess.run(test_dequeue_op.close(cancel_pending_enqueues=True))
         # Ask the threads to stop.
         coord.request_stop()
         # And wait for them to actually do it.
