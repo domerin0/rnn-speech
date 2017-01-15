@@ -356,7 +356,6 @@ class AcousticModel(object):
 
             # Take an item in the list and increase position
             [t_local_data.file, t_local_data.text, _] = t_local_data.dataset[t_local_data.current_pos]
-            t_local_data.current_pos += 1
 
             # Calculate MFCC
             self.lock.acquire()
@@ -374,6 +373,8 @@ class AcousticModel(object):
             except ValueError:
                 # Incorrect label
                 logging.warning("Incorrect label for %s (%s)", t_local_data.file, t_local_data.text)
+                # Remove the file from the list
+                t_local_data.dataset.pop(t_local_data.current_pos)
                 continue
             # Check sizes and pad if needed
             t_local_data.label_data_length = len(t_local_data.label_data)
@@ -382,6 +383,8 @@ class AcousticModel(object):
                 # If either input or output vector is too long we shouldn't take this sample
                 logging.warning("Warning - sample too long : %s (input : %d / text : %s)",
                                 t_local_data.file, t_local_data.original_mfcc_length, t_local_data.label_data_length)
+                # Remove the file from the list
+                t_local_data.dataset.pop(t_local_data.current_pos)
                 continue
             elif t_local_data.label_data_length < self.max_target_seq_length:
                 # Label need padding
@@ -396,6 +399,9 @@ class AcousticModel(object):
                 # The queue may have been cancelled so we should stop
                 coord.request_stop(e)
                 break
+
+            # Go to next file on the list
+            t_local_data.current_pos += 1
 
     @staticmethod
     def dequeue_data(sess, dequeue_op):

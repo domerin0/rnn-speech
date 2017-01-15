@@ -1,10 +1,32 @@
 #!/bin/bash
 
 CONFIG_FILE=config.ini
-PARAMETER=dropout
+PARAMETER=signal_processing
 
-for VALUE in '0.0' '0.1' '0.2' '0.3' '0.4' '0.5' '0.6' '0.7' '0.8' '0.9' '1.0'
+for VALUE in 'mfcc' 'fbank'
 do
     sed -i 's/\('${PARAMETER}' : \).*/\1'${VALUE}'/' ${CONFIG_FILE}
     python3 stt.py --train --tb_name ${PARAMETER}'_'${VALUE} --max_epoch 1000
+    mv data/checkpoints data/checkpoint_${PARAMETER}'_'${VALUE}
+    mkdir data/checkpoints
+done
+
+PARAMETER=batch_normalization
+
+for VALUE in 'True' 'False'
+do
+    sed -i 's/\('${PARAMETER}' : \).*/\1'${VALUE}'/' ${CONFIG_FILE}
+    python3 stt.py --train --tb_name ${PARAMETER}'_'${VALUE} --max_epoch 1000
+    mv data/checkpoints data/checkpoint_${PARAMETER}'_'${VALUE}
+    mkdir data/checkpoints
+done
+
+PARAMETER=dataset_size_ordering
+
+for VALUE in 'True' 'False'
+do
+    sed -i 's/\('${PARAMETER}' : \).*/\1'${VALUE}'/' ${CONFIG_FILE}
+    python3 stt.py --train --tb_name ${PARAMETER}'_'${VALUE} --max_epoch 1000
+    mv data/checkpoints data/checkpoint_${PARAMETER}'_'${VALUE}
+    mkdir data/checkpoints
 done
