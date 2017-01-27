@@ -476,7 +476,7 @@ class AcousticModel(object):
         for t in threads:
             t.start()
 
-        previous_loss = None
+        previous_best_loss = None
         no_improvement_since = 0
         step_time, mean_loss = 0.0, 0.0
         current_step = 1
@@ -508,18 +508,21 @@ class AcousticModel(object):
                 step_time, mean_loss = 0.0, 0.0
 
                 if num_test_batches > 0:
-                    # Decrease learning rate if the model is not improving
-                    if (previous_loss is not None) and (chkpt_loss >= previous_loss):
+                    # Decrease learning rate if the model is not improving. The model is not improving if the loss
+                    # does not get better after two iterations. This way it allow for a temporary degradation but it
+                    # must improve, otherwise it means that the model is probably oscillating
+                    if (previous_best_loss is not None) and (chkpt_loss >= previous_best_loss):
                         no_improvement_since += 1
-                        if no_improvement_since == 4:
+                        if no_improvement_since == 2:
                             sess.run(self.learning_rate_decay_op)
                             no_improvement_since = 0
+                            previous_best_loss = chkpt_loss
                             if self.learning_rate.eval() < 1e-7:
                                 # End learning process
                                 break
                     else:
                         no_improvement_since = 0
-                    previous_loss = chkpt_loss
+                        previous_best_loss = chkpt_loss
 
             current_step += 1
             if (max_epoch is not None) and (current_step > max_epoch):
