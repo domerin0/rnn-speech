@@ -108,8 +108,10 @@ def evaluate(audio_processor, hyper_params):
                                       tb_run_name=None, timeline_enabled=False)
 
         wer_list = []
+        file_number = 0
         for file, label, _ in test_set:
             feat_vec, original_feat_vec_length = audio_processor.process_audio_file(file)
+            file_number += 1
             label_data_length = len(label)
             if (label_data_length > hyper_params["max_target_seq_length"]) or\
                (original_feat_vec_length > hyper_params["max_input_seq_length"]):
@@ -120,6 +122,7 @@ def evaluate(audio_processor, hyper_params):
             (a, b) = feat_vec.shape
             feat_vec = feat_vec.reshape((a, 1, b))
             transcribed_text = model.process_input(sess, feat_vec, [original_feat_vec_length])
+            logging.debug("Processed file %d / %d", file_number, len(test_set))
             wer_list.append(model.calculate_wer(transcribed_text.split(), label.split()) / float(len(label.split())))
 
         print("Resulting WER : {0:.3g} %".format((sum(wer_list) * 100) / float(len(wer_list))))
