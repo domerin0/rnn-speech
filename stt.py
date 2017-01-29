@@ -5,6 +5,7 @@ Main program to use the speech recognizer.
 
 from models.AcousticModel import AcousticModel
 import tensorflow as tf
+import numpy as np
 import util.hyperparams as hyperparams
 import util.audioprocessor as audioprocessor
 import util.dataprocessor as dataprocessor
@@ -83,7 +84,7 @@ def process_file(audio_processor, hyper_params, file):
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
         transcribed_text = model.process_input(sess, feat_vec, [original_feat_vec_length])
-        print(transcribed_text)
+        print(transcribed_text[0])
 
 
 def evaluate(audio_processor, hyper_params):
@@ -104,26 +105,49 @@ def evaluate(audio_processor, hyper_params):
 
     with tf.Session() as sess:
         # create model
-        model = create_acoustic_model(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None,
-                                      tb_run_name=None, timeline_enabled=False)
+        model = create_acoustic_model(sess, hyper_params, hyper_params["batch_size"], forward_only=True,
+                                      tensorboard_dir=None, tb_run_name=None, timeline_enabled=False)
 
         wer_list = []
         file_number = 0
+        input_feat_vecs = []
+        input_feat_vec_lengths = []
+        labels = []
         for file, label, _ in test_set:
-            feat_vec, original_feat_vec_length = audio_processor.process_audio_file(file)
+            feat_vec, feat_vec_length = audio_processor.process_audio_file(file)
             file_number += 1
             label_data_length = len(label)
             if (label_data_length > hyper_params["max_target_seq_length"]) or\
-               (original_feat_vec_length > hyper_params["max_input_seq_length"]):
+               (feat_vec_length > hyper_params["max_input_seq_length"]):
                 logging.warning("Warning - sample too long : %s (input : %d / text : %s)",
-                                file, original_feat_vec_length, label_data_length)
-                continue
+                                file, feat_vec_length, label_data_length)
+            else:
+                logging.debug("Processed file %d / %d", file_number, len(test_set))
+                input_feat_vecs.append(feat_vec)
+                input_feat_vec_lengths.append(feat_vec_length)
+                labels.append(label)
 
-            (a, b) = feat_vec.shape
-            feat_vec = feat_vec.reshape((a, 1, b))
-            transcribed_text = model.process_input(sess, feat_vec, [original_feat_vec_length])
-            logging.debug("Processed file %d / %d", file_number, len(test_set))
-            wer_list.append(model.calculate_wer(transcribed_text.split(), label.split()) / float(len(label.split())))
+            # If we reached the last file then pad the lists to obtain a full batch
+            if file_number == len(test_set):
+                for i in range(hyper_params["batch_size"] - len(input_feat_vecs)):
+                    input_feat_vecs.append(np.zeros([hyper_params["max_input_seq_length"],
+                                                     audio_processor.feature_size]))
+                    input_feat_vec_lengths.append(0)
+                    labels.append("")
+
+            if len(input_feat_vecs) == hyper_params["batch_size"]:
+                # Run the batch
+                logging.debug("Running a batch")
+                input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
+                transcribed_texts = model.process_input(sess, input_feat_vecs, input_feat_vec_lengths)
+                for index, transcribed_text in enumerate(transcribed_texts):
+                    if len(labels[index]) > 0:
+                        wer_list.append(model.calculate_wer(transcribed_text.split(),
+                                                            labels[index].split()) / float(len(labels[index].split())))
+                # Reset the lists
+                input_feat_vecs = []
+                input_feat_vec_lengths = []
+                labels = []
 
         print("Resulting WER : {0:.3g} %".format((sum(wer_list) * 100) / float(len(wer_list))))
         return
@@ -154,7 +178,6 @@ def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, 
 
 def record_and_write(audio_processor, hyper_params):
     import pyaudio
-    import numpy as np
     _CHUNK = hyper_params["max_input_seq_length"]
     _SR = 22050
     p = pyaudio.PyAudio()

@@ -193,9 +193,16 @@ class AcousticModel(object):
         return [_CHAR_MAP.index(char) for char in _str]
 
     @staticmethod
-    def transcribe_from_prediction(prediction):
-        transcribed_text = [_CHAR_MAP[index] for index in prediction.values]
-        return "".join(transcribed_text)
+    def transcribe_from_prediction(predictions):
+        """
+        Input : a vector containing the predictions for a batch (batch, predictions)
+        Output : a list of predicted labels
+        """
+        transcribed_texts = []
+        for prediction in predictions:
+            char_list = [_CHAR_MAP[index] for index in prediction if 0 <= index < len(_CHAR_MAP)]
+            transcribed_texts.append("".join(char_list))
+        return transcribed_texts
 
     @staticmethod
     def calculate_wer(r, h):
@@ -315,7 +322,9 @@ class AcousticModel(object):
                       self.input_seq_lengths.name: np.array(input_seq_lengths)}
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed)
-        transcribed_text = self.transcribe_from_prediction(outputs[0])
+        predictions = session.run(tf.sparse_tensor_to_dense(outputs[0], default_value=len(_CHAR_MAP),
+                                                            validate_indices=True))
+        transcribed_text = self.transcribe_from_prediction(predictions)
         return transcribed_text
 
     def run_checkpoint(self, sess, checkpoint_dir, num_test_batches, dequeue_op):
