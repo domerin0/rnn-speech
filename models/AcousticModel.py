@@ -194,14 +194,8 @@ class AcousticModel(object):
 
     @staticmethod
     def transcribe_from_prediction(prediction):
-        transcribed_text = ""
-        previous_char = ""
-        for i in prediction.values:
-            char = _CHAR_MAP[i]
-            if char != previous_char:
-                transcribed_text += char
-            previous_char = char
-        return transcribed_text
+        transcribed_text = [_CHAR_MAP[index] for index in prediction.values]
+        return "".join(transcribed_text)
 
     @staticmethod
     def calculate_wer(r, h):
