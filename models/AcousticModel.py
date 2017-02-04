@@ -61,7 +61,7 @@ class AcousticModel(object):
         self.batch_size = batch_size
         self.learning_rate = tf.Variable(float(learning_rate), trainable=False, name='learning_rate')
         tf.summary.scalar('Learning_rate', self.learning_rate, collections=[graphkey_training, graphkey_test])
-        self.learning_rate_decay_op = self.learning_rate.assign(learning_rate * lr_decay_factor)
+        self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * lr_decay_factor)
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.max_input_seq_length = max_input_seq_length
         self.max_target_seq_length = max_target_seq_length
