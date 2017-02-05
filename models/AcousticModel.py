@@ -343,7 +343,7 @@ class AcousticModel(object):
 
                 step_loss = self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
                                       label_indices_batch, forward_only=True)
-                mean_loss = step_loss / num_test_batches
+                mean_loss += step_loss / num_test_batches
             logging.info("Finished test set - resulting loss is %.2f", mean_loss)
         return mean_loss
 
