@@ -109,6 +109,7 @@ def evaluate(audio_processor, hyper_params):
                                       tensorboard_dir=None, tb_run_name=None, timeline_enabled=False)
 
         wer_list = []
+        cer_list = []
         file_number = 0
         input_feat_vecs = []
         input_feat_vec_lengths = []
@@ -141,15 +142,19 @@ def evaluate(audio_processor, hyper_params):
                 input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
                 transcribed_texts = model.process_input(sess, input_feat_vecs, input_feat_vec_lengths)
                 for index, transcribed_text in enumerate(transcribed_texts):
-                    if len(labels[index]) > 0:
-                        wer_list.append(model.calculate_wer(transcribed_text.split(),
-                                                            labels[index].split()) / float(len(labels[index].split())))
+                    true_label = labels[index]
+                    if len(true_label) > 0:
+                        nb_words = len(true_label.split())
+                        nb_chars = len(true_label.replace(" ", ""))
+                        wer_list.append(model.calculate_wer(transcribed_text, true_label) / float(nb_words))
+                        cer_list.append(model.calculate_cer(transcribed_text, true_label) / float(nb_chars))
                 # Reset the lists
                 input_feat_vecs = []
                 input_feat_vec_lengths = []
                 labels = []
 
         print("Resulting WER : {0:.3g} %".format((sum(wer_list) * 100) / float(len(wer_list))))
+        print("Resulting CER : {0:.3g} %".format((sum(cer_list) * 100) / float(len(cer_list))))
         return
 
 

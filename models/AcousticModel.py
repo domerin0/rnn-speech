@@ -205,19 +205,19 @@ class AcousticModel(object):
         return transcribed_texts
 
     @staticmethod
-    def calculate_wer(r, h):
+    def calculate_wer(first_string, second_string):
         """
         Source : https://martin-thoma.com/word-error-rate-calculation/
 
         Calculation of WER with Levenshtein distance.
 
-        Works only for iterables up to 254 elements (uint8).
+        Works only for strings up to 254 characters (uint8).
         O(nm) time ans space complexity.
 
         Parameters
         ----------
-        r : list
-        h : list
+        first_string : string
+        second_string : string
 
         Returns
         -------
@@ -225,15 +225,69 @@ class AcousticModel(object):
 
         Examples
         --------
-        > wer("who is there".split(), "is there".split())
+        > calculate_wer("who is there", "is there")
         1
-        > wer("who is there".split(), "".split())
+        > calculate_wer("who is there", "")
         3
-        > wer("".split(), "who is there".split())
+        > calculate_wer("", "who is there")
         3
         """
         # initialisation
+        r = first_string.split()
+        h = second_string.split()
+
         d = np.zeros((len(r) + 1) * (len(h) + 1), dtype=np.uint8)
+        d = d.reshape((len(r) + 1, len(h) + 1))
+        for i in range(len(r) + 1):
+            for j in range(len(h) + 1):
+                if i == 0:
+                    d[0][j] = j
+                elif j == 0:
+                    d[i][0] = i
+
+        # computation
+        for i in range(1, len(r) + 1):
+            for j in range(1, len(h) + 1):
+                if r[i - 1] == h[j - 1]:
+                    d[i][j] = d[i - 1][j - 1]
+                else:
+                    substitution = d[i - 1][j - 1] + 1
+                    insertion = d[i][j - 1] + 1
+                    deletion = d[i - 1][j] + 1
+                    d[i][j] = min(substitution, insertion, deletion)
+
+        return d[len(r)][len(h)]
+
+    @staticmethod
+    def calculate_cer(first_string, second_string):
+        """
+        Calculation of Character Error Rate (CER).
+
+        Works only for strings up to 65635 elements (uint16).
+
+        Parameters
+        ----------
+        first_string : string
+        second_string : string
+
+        Returns
+        -------
+        int
+
+        Examples
+        --------
+        > calculate_cer("who is there", "whois there")
+        0
+        > calculate_cer("who is there", "who i thre")
+        2
+        > calculate_cer("", "who is there")
+        10
+        """
+        # initialisation
+        r = list(first_string.replace(" ", ""))
+        h = list(second_string.replace(" ", ""))
+
+        d = np.zeros((len(r) + 1) * (len(h) + 1), dtype=np.uint16)
         d = d.reshape((len(r) + 1, len(h) + 1))
         for i in range(len(r) + 1):
             for j in range(len(h) + 1):
