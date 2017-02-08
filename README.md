@@ -10,11 +10,15 @@ model. The acoustic model can read in either mel frequency cepstral coefficient,
 
 The audio signal processing is done using [librosa](https://github.com/librosa/librosa).
 
-Currently only the acoustic model has been completed and it still lack a good trained example.
+Currently only the acoustic model has been completed.
 One pre-trained example is available [here](trained_models/acoustic_model/english) and can be tried
 on any file (your own recorded voice for example).
 
-The character-level language model is still in the works.
+Results on LibriSpeech's test-clean evaluation set for the pre-trained model is :
+* __CER : 21,3 %__
+* __WER : 56,2 %__
+
+It lacks the character-level language model which is still in the works.
 
 ###Data
 
@@ -81,8 +85,14 @@ You can also use a trained network to process a wav file
 
 ``$ python stt.py --file "path_to_file.wav"``
 
-The result will be printed on standard input. At this time only the acoustic model will process so the result can be
-weird.  
+The result will be printed on standard input.
+
+####Evaluating the network
+You can evaluate a trained network on a evaluation test set (config.ini file's _test_dataset_dirs_ parameter)
+
+``$ python stt.py --evaluate``
+
+The resulting CER (character error rate) and WER (word error rate) will be printed on standard input.
 
 ####Analysing performance
 You can add the `--timeline` option in order to produce a timeline file and see how everything is going.
