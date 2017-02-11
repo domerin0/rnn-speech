@@ -32,7 +32,7 @@ The data is fed through two pipelines, one for testing, and the other for traini
 
 ###How to Run
 ####Cloning the repository
-IF you intend to use a pre-trained model you should clone the repository with the
+If you intend to use a pre-trained model you should clone the repository with the
 [lfs plugin](https://git-lfs.github.com/)
 
     $ git lfs clone https://github.com/inikdom/rnn-speech.git
