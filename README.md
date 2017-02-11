@@ -31,6 +31,17 @@ The datasets currently supported are :
 The data is fed through two pipelines, one for testing, and the other for training.
 
 ###How to Run
+####Cloning the repository
+IF you intend to use a pre-trained model you should clone the repository with the
+[lfs plugin](https://git-lfs.github.com/)
+
+    $ git lfs clone https://github.com/inikdom/rnn-speech.git
+
+If you have already cloned the repository without lfs, you can download the missing files with :
+
+    $ git lfs pull
+
+
 ####Install dependencies
 #####Required
 
@@ -42,7 +53,7 @@ mandatory but strongly recommended if you intend to train the RNN.
 
 Install other required dependencies by running :
 
-`pip3 install -r requirements.txt`
+    $ pip3 install -r requirements.txt
 
 #####Optional
 1. sox (for live transcript only, install with `sudo apt-get install sox` or `brew install sox --with-flac`)
@@ -54,10 +65,8 @@ Install other required dependencies by running :
 
 I've prepared a bash script to download LibriSpeech (~700mb) and extract the data to the right place :
 
-````
-$ chmod +x prepare_data.sh
-$ ./prepare_data.sh
-````
+    $ chmod +x prepare_data.sh
+    $ ./prepare_data.sh
 
 It will remove the tar files after downloading and unzipping.
 
@@ -66,7 +75,7 @@ It will remove the tar files after downloading and unzipping.
 All hyper parameters for the network are defined in `config.ini`. A different config file can be fed to the training
 program using something like:
 
-``$ python stt.py --config_file="different_config_file.ini"``
+    $ python stt.py --config_file="different_config_file.ini"
 
 You should ensure it follows the same format as the one provided.
 
@@ -74,7 +83,7 @@ You should ensure it follows the same format as the one provided.
 Once your dependencies are set up, and data is downloaded and extracted into the appropriate location,
 the optimizer can be started by doing :
 
-``$ python stt.py --train``
+    $ python stt.py --train
 
 Dynamic RNNs are used as memory consumption on the entirely unrolled network was massive, and the model would take
 30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it
@@ -83,14 +92,14 @@ Dynamic RNNs are used as memory consumption on the entirely unrolled network was
 ####Running the network
 You can also use a trained network to process a wav file
 
-``$ python stt.py --file "path_to_file.wav"``
+    $ python stt.py --file "path_to_file.wav"
 
 The result will be printed on standard input.
 
 ####Evaluating the network
 You can evaluate a trained network on a evaluation test set (config.ini file's _test_dataset_dirs_ parameter)
 
-``$ python stt.py --evaluate``
+    $ python stt.py --evaluate
 
 The resulting CER (character error rate) and WER (word error rate) will be printed on standard input.
 

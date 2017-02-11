@@ -29,7 +29,11 @@ Test set contains :
 * LibriSpeech's test-clean
 
 ### How to try it
-Make sure to set those parameters in your config file :
+First check that you have downloaded the lfs managed files. Execute this command in project's root dir :
+
+    $ git lfs pull
+
+Then make sure to set those parameters in your config file :
 
     [acoustic_network_params]
     num_layers : 3
@@ -40,6 +44,7 @@ Make sure to set those parameters in your config file :
     learning_rate : 0.0003
     lr_decay_factor : 0.33
     grad_clip : 5
+    signal_processing : fbank
         
     [general]
     use_config_file_if_checkpoint_exists : True
@@ -55,7 +60,7 @@ Make sure to set those parameters in your config file :
 
 Run the model on a "less than 15 seconds long" wav file of your choice
 
-    python3 stt.py --file data/LibriSpeech/dev-clean/2086/149220/2086-149220-0007.flac
+    $ python3 stt.py --file data/LibriSpeech/dev-clean/2086/149220/2086-149220-0007.flac
 
 On this example file from Librispeech dev set that the model never trained on you will obtain :
 
@@ -76,7 +81,7 @@ Put the test data in another directory and set it in config file
 
 Launch training and wait...
 
-    python3 stt.py --train --tb_name libri_shoota_TEDLIUM
+    $ python3 stt.py --train --tb_name libri_shoota_TEDLIUM
 
 
 ### Training graphs
