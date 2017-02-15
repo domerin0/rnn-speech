@@ -4,9 +4,13 @@ Based on the paper:
 
 http://arxiv.org/pdf/1601.06581v2.pdf
 
+And some improvements from :
+
+https://arxiv.org/pdf/1609.05935v2.pdf
+
 This model is:
 
-acoustic RNN trained with ctc loss
+Acoustic RNN trained with ctc loss
 """
 
 import tensorflow as tf
@@ -17,20 +21,34 @@ from datetime import datetime
 import threading
 import logging
 
-_CHAR_MAP = "abcdefghijklmnopqrstuvwxyz .'-_"
+ENGLISH_CHAR_MAP = [
+                    # Apostrophes with one or two letters
+                    "'d", "'ll", "'m", "'nt", "'s", "s'", "'t", "'ve",
+                    # Double letters first
+                    'bb', 'cc', 'dd', 'ee', 'ff', 'gg', 'ii', 'kk', 'll', 'mm', 'nn',
+                    'oo', 'pp', 'rr', 'ss', 'tt', 'uu', 'zz',
+                    # Alphabet normal and capital
+                    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+                    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+                    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+                    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+                    # Apostrophe only for specific cases (eg. : O'clock)
+                    "'",
+                    # "end of sentence" character for CTC algorithm
+                    '_'
+                    ]
 
 
 class AcousticModel(object):
-    def __init__(self, session, num_labels, num_layers, hidden_size, input_keep_prob, output_keep_prob,
+    def __init__(self, session, num_layers, hidden_size, input_keep_prob, output_keep_prob,
                  batch_size, learning_rate, lr_decay_factor, grad_clip,
                  max_input_seq_length, max_target_seq_length, input_dim, normalization,
                  forward_only=False, tensorboard_dir=None, tb_run_name=None,
-                 timeline_enabled=False):
+                 timeline_enabled=False, language='english'):
         """
         Acoustic rnn model, using ctc loss with lstm cells
         Inputs:
         session - tensorflow session
-        num_labels - dimension of character input/one hot encoding
         num_layers - number of lstm layers
         hidden_size - size of hidden layers
         input_keep_prob - probability of keeping input signal for a cell during training
@@ -47,6 +65,7 @@ class AcousticModel(object):
         tensorboard_dir - path to tensorboard file (None if not activated)
         tb_run_name - directory name for the tensorboard files (inside tensorboard_dir, None mean no sub-directory)
         timeline_enabled - enable the output of a trace file for timeline visualization
+        language - the language of the speech
         """
         # Initialize thread management
         self.lock = threading.Lock()
@@ -69,6 +88,13 @@ class AcousticModel(object):
         self.timeline_enabled = timeline_enabled
         self.input_dim = input_dim
         self.epsilon = 1e-3
+
+        # Set language
+        if language == 'english':
+            self.char_map = ENGLISH_CHAR_MAP
+        else:
+            raise ValueError("Invalid parameter 'language' for method '__init__'")
+        num_labels = len(self.char_map)
 
         # graph inputs
         self.inputs = tf.placeholder(tf.float32,
@@ -179,30 +205,84 @@ class AcousticModel(object):
         save_list = [var for var in tf.global_variables() if var.name.find('hidden_state') == -1]
         self.saver = tf.train.Saver(save_list)
 
-    @staticmethod
-    def get_str_labels(_str):
-        # Remove punctuation
-        _str = _str.replace(".", "")
-        _str = _str.replace(",", "")
-        _str = _str.replace("?", "")
-        _str = _str.replace("'", "")
-        _str = _str.replace("!", "")
-        _str = _str.replace(":", "")
-        # add eos char
-        _str += "_"
-        return [_CHAR_MAP.index(char) for char in _str]
+    def get_str_labels(self, _str):
+        """
+        Convert a string into a label vector for the model
+        The char map follow recommendations from : https://arxiv.org/pdf/1609.05935v2.pdf
 
-    @staticmethod
-    def transcribe_from_prediction(predictions):
+        Parameters
+        ----------
+        _str : the string to convert into a label
+
+        Returns
+        -------
+        vector of int
         """
-        Input : a vector containing the predictions for a batch (batch, predictions)
-        Output : a list of predicted labels
+        # add eos char
+        _str += self.char_map[-1]
+        # Remove spaces and set each word start with a capital letter
+        next_is_upper = True
+        result = []
+        for i in range(len(_str)):
+            if _str[i] is ' ':
+                next_is_upper = True
+            else:
+                if next_is_upper:
+                    result.append(_str[i].upper())
+                    next_is_upper = False
+                else:
+                    result.append(_str[i])
+        _str = "".join(result)
+        # Convert to self.char_map indexes
+        result = []
+        i = 0
+        while i < len(_str):
+            if len(_str) - i >= 3:
+                try:
+                    result.append(self.char_map.index(_str[i:i+3]))
+                    i += 3
+                    continue
+                except ValueError:
+                    pass
+            if len(_str) - i >= 2:
+                try:
+                    result.append(self.char_map.index(_str[i:i+2]))
+                    i += 2
+                    continue
+                except ValueError:
+                    pass
+            try:
+                result.append(self.char_map.index(_str[i:i+1]))
+                i += 1
+                continue
+            except ValueError:
+                logging.warning("Unable to process label : %s", _str)
+                return []
+        return result
+
+    def get_labels_str(self, label):
         """
-        transcribed_texts = []
-        for prediction in predictions:
-            char_list = [_CHAR_MAP[index] for index in prediction if 0 <= index < len(_CHAR_MAP)]
-            transcribed_texts.append("".join(char_list))
-        return transcribed_texts
+        Convert a vector issued from the model into a readable string
+
+        Parameters
+        ----------
+        label : a vector of int containing the predicted label
+
+        Returns
+        -------
+        string
+        """
+        # Convert int to values in self.char_map
+        char_list = [self.char_map[index] for index in label if 0 <= index < len(self.char_map)]
+        # Remove eos character
+        char_list.remove(self.char_map[-1])
+        # Add spaces in front of capitalized letters (except the first one) and lower every letter
+        result = []
+        for i in range(len(char_list)):
+            if (i != 0) and (char_list[i].isupper()):
+                result.append(" ")
+            result.append(char_list[i].lower())
+        return "".join(result)
 
     @staticmethod
     def calculate_wer(first_string, second_string):
@@ -376,9 +456,9 @@ class AcousticModel(object):
                       self.input_seq_lengths.name: np.array(input_seq_lengths)}
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed)
-        predictions = session.run(tf.sparse_tensor_to_dense(outputs[0], default_value=len(_CHAR_MAP),
+        predictions = session.run(tf.sparse_tensor_to_dense(outputs[0], default_value=len(self.char_map),
                                                             validate_indices=True))
-        transcribed_text = self.transcribe_from_prediction(predictions)
+        transcribed_text = [self.get_labels_str(prediction) for prediction in predictions]
         return transcribed_text
 
     def run_checkpoint(self, sess, checkpoint_dir, num_test_batches, dequeue_op):
@@ -425,9 +505,8 @@ class AcousticModel(object):
                 self.lock.release()
 
             # Convert string to numbers
-            try:
-                t_local_data.label_data = self.get_str_labels(t_local_data.text)
-            except ValueError:
+            t_local_data.label_data = self.get_str_labels(t_local_data.text)
+            if len(t_local_data.label_data) == 0:
                 # Incorrect label
                 logging.warning("Incorrect label for %s (%s)", t_local_data.file, t_local_data.text)
                 # Remove the file from the list

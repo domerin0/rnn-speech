@@ -44,6 +44,31 @@ class DataProcessor(object):
 
         return data
 
+    @staticmethod
+    def clean_label(_str):
+        """
+        Remove unauthorized characters in a string, lower it and remove unneeded spaces
+
+        Parameters
+        ----------
+        _str : the original string
+
+        Returns
+        -------
+        string
+        """
+        _str = _str.strip()
+        _str = _str.lower()
+        _str = _str.replace(".", "")
+        _str = _str.replace(",", "")
+        _str = _str.replace("?", "")
+        _str = _str.replace("!", "")
+        _str = _str.replace(":", "")
+        _str = _str.replace("-", " ")
+        _str = _str.replace("_", " ")
+        _str = _str.replace("  ", " ")
+        return _str
+
     @classmethod
     def get_type(cls, raw_data_path):
         # Check for ".trn" files
@@ -86,7 +111,7 @@ class DataProcessor(object):
                     audio_file = directory + "/" + head + ".flac"
                     if os.path.exists(audio_file):
                         file_size = os.path.getsize(audio_file)
-                        result.append([audio_file, line.replace(head, "").strip().lower(), file_size])
+                        result.append([audio_file, self.clean_label(line.replace(head, "")), file_size])
         return result
 
     def get_data_shtooka(self, raw_data_path):
@@ -102,8 +127,7 @@ class DataProcessor(object):
                     audio_file = root + section
                     if os.path.exists(audio_file):
                         file_size = os.path.getsize(audio_file)
-                        result.append([audio_file, config[section]['SWAC_TEXT'].strip().lower().replace("_", "-"),
-                                      file_size])
+                        result.append([audio_file, self.clean_label(config[section]['SWAC_TEXT']), file_size])
         return result
 
     def get_data_vystadial_2013(self, raw_data_path):
@@ -115,7 +139,7 @@ class DataProcessor(object):
                 with open(file + ".trn", "r") as f:
                     words = f.readline()
                     file_size = os.path.getsize(file)
-                    result.append([file, words.strip().lower().replace("_", "-"), file_size])
+                    result.append([file, self.clean_label(words), file_size])
         return result
 
     def get_data_tedlium(self, raw_data_path):
@@ -140,5 +164,5 @@ class DataProcessor(object):
                             extract_result = self.audio_processor.extractWavFromSph(sph_file, wav_file, start, end)
                         if extract_result is not False:
                             file_size = os.path.getsize(wav_file)
-                            result.append([wav_file, line_list[6].strip().lower().replace("_", "-"), file_size])
+                            result.append([wav_file, self.clean_label(line_list[6]), file_size])
         return result

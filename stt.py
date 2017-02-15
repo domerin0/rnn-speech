@@ -160,15 +160,15 @@ def evaluate(audio_processor, hyper_params):
 
 def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None,
                           tb_run_name=None, timeline_enabled=False):
-    num_labels = 31
     logging.info("Building model... (this takes a while)")
-    model = AcousticModel(session, num_labels, hyper_params["num_layers"], hyper_params["hidden_size"],
+    model = AcousticModel(session, hyper_params["num_layers"], hyper_params["hidden_size"],
                           hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
                           batch_size, hyper_params["learning_rate"], hyper_params["lr_decay_factor"],
                           hyper_params["grad_clip"], hyper_params["max_input_seq_length"],
                           hyper_params["max_target_seq_length"], hyper_params["input_dim"],
                           hyper_params["batch_normalization"], forward_only=forward_only,
-                          tensorboard_dir=tensorboard_dir, tb_run_name=tb_run_name, timeline_enabled=timeline_enabled)
+                          tensorboard_dir=tensorboard_dir, tb_run_name=tb_run_name, timeline_enabled=timeline_enabled,
+                          language=hyper_params["language"])
     ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
     # Initialize variables
     session.run(tf.global_variables_initializer())
