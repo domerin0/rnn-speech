@@ -80,9 +80,13 @@ class HyperParameterHandler(object):
             # Default signal_processing to mfcc if not present for compatibility with old checkpoint files
             if "signal_processing" not in old_params:
                 old_params["signal_processing"] = "mfcc"
+            # Default language to void string if not present for compatibility with old checkpoint files
+            if "language" not in old_params:
+                old_params["language"] = ""
             return old_params["num_layers"] != new_params["num_layers"] or\
                 old_params["hidden_size"] != new_params["hidden_size"] or\
-                old_params["signal_processing"] != new_params["signal_processing"]
+                old_params["signal_processing"] != new_params["signal_processing"] or\
+                old_params["language"] != new_params["language"]
         else:
             return False
 
@@ -103,6 +107,7 @@ class HyperParameterHandler(object):
         dic["dropout_input_keep_prob"] = config.getfloat(acoustic_section, "dropout_input_keep_prob")
         dic["dropout_output_keep_prob"] = config.getfloat(acoustic_section, "dropout_output_keep_prob")
         dic["batch_size"] = config.getint(acoustic_section, "batch_size")
+        dic["nb_iterations"] = config.getint(acoustic_section, "nb_iterations")
         dic["learning_rate"] = config.getfloat(acoustic_section, "learning_rate")
         dic["lr_decay_factor"] = config.getfloat(acoustic_section, "lr_decay_factor")
         dic["grad_clip"] = config.getint(acoustic_section, "grad_clip")
