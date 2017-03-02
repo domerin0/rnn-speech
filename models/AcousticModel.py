@@ -125,9 +125,18 @@ class AcousticModel(object):
             self.tensorboard_rnn(session, tensorboard_dir, tb_run_name)
 
         # Finally define an op to save or restore the network
-        # Note : save all variables except for the hidden_state
-        # TODO: should not save the gradients accumulators either
-        save_list = [var for var in tf.global_variables() if var.name.find('hidden_state') == -1]
+        # Only save needed tensors :
+        #   - weight and biais from the input layer, the output layer and the LSTM
+        #   - currents global_step and leaning_rate
+        save_list = [var for var in tf.global_variables()
+                     if (var.name.find('/input_w:0') != -1) or (var.name.find('/input_b:0') != -1) or
+                        (var.name.find('/output_w:0') != -1) or (var.name.find('/output_w:0') != -1) or
+                        (var.name.find('global_step:0') != -1) or (var.name.find('learning_rate:0') != -1) or
+                        (var.name.find('/weights:0') != -1) or (var.name.find('/biases:0') != -1)]
+
+        for var in tf.global_variables():
+            logging.debug("TF variable : %s - %s", var.name, var)
+
         self.saver = tf.train.Saver(save_list)
 
     def build_base_rnn(self, hidden_size, num_layers, num_labels, input_dim, batch_size,
@@ -158,7 +167,8 @@ class AcousticModel(object):
         self.input_seq_lengths = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths")
 
         # Define cells of acoustic model
-        cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, state_is_tuple=True)
+        with tf.name_scope('LSTM'):
+            cell = tf.contrib.rnn.BasicLSTMCell(hidden_size, state_is_tuple=True)
 
         # Define a dropout layer (used only when training)
         with tf.name_scope('dropout'):
@@ -167,11 +177,12 @@ class AcousticModel(object):
             self.output_keep_prob_ph = tf.placeholder(tf.float32)
             if not forward_only:
                 # If we are in training then add a dropoutWrapper to the cells
-                cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=self.input_keep_prob_ph,
+                cell = tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=self.input_keep_prob_ph,
                                                      output_keep_prob=self.output_keep_prob_ph)
 
-        if num_layers > 1:
-            cell = tf.nn.rnn_cell.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
+        with tf.name_scope('LSTM'):
+            if num_layers > 1:
+                cell = tf.contrib.rnn.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
 
         # Build the input layer between input and the RNN
         with tf.name_scope('Input_Layer'):
@@ -180,24 +191,25 @@ class AcousticModel(object):
             b_i = tf.Variable(tf.zeros([hidden_size]), name="input_b")
 
         # Apply the input layer to the network input to produce the input for the rnn part of the network
-        rnn_inputs = [tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_i) + b_i
-                      for i in tf.split(0, max_input_seq_length, self.inputs)]
+        rnn_inputs = [tf.matmul(tf.squeeze(i, axis=[0]), w_i) + b_i
+                      for i in tf.split(axis=0, num_or_size_splits=max_input_seq_length, value=self.inputs)]
         # Switch from a list to a tensor
-        rnn_inputs = tf.pack(rnn_inputs)
+        rnn_inputs = tf.stack(rnn_inputs)
 
         # If we are in training then add a batch normalization layer to the model
-        if normalization and not forward_only:
-            epsilon = 1e-3
-            # Note : the tensor is [time, batch_size, input vector] so we go against dim 1
-            batch_mean, batch_var = tf.nn.moments(rnn_inputs, [1], shift=None, name="moments", keep_dims=True)
-            rnn_inputs = tf.nn.batch_normalization(rnn_inputs, batch_mean, batch_var, None, None,
-                                                   epsilon, name="batch_norm")
+        with tf.name_scope('Normalization'):
+            if normalization and not forward_only:
+                epsilon = 1e-3
+                # Note : the tensor is [time, batch_size, input vector] so we go against dim 1
+                batch_mean, batch_var = tf.nn.moments(rnn_inputs, [1], shift=None, name="moments", keep_dims=True)
+                rnn_inputs = tf.nn.batch_normalization(rnn_inputs, batch_mean, batch_var, None, None,
+                                                       epsilon, name="batch_norm")
 
         # Set the RNN initial state to 0s
         init_state = cell.zero_state(batch_size, tf.float32)
 
         # Build the RNN
-        with tf.name_scope('Dynamic_rnn'):
+        with tf.name_scope('LSTM'):
             rnn_output, self.hidden_state = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=self.input_seq_lengths,
                                                               initial_state=init_state, time_major=True)
 
@@ -208,8 +220,8 @@ class AcousticModel(object):
             b_o = tf.Variable(tf.zeros([num_labels]), name="output_b")
 
         # Compute the logits (each char probability for each timestep of the input, for each item of the batch)
-        logits = tf.pack([tf.matmul(tf.squeeze(i, squeeze_dims=[0]), w_o) + b_o
-                          for i in tf.split(0, max_input_seq_length, rnn_output)])
+        logits = tf.stack([tf.matmul(tf.squeeze(i, axis=[0]), w_o) + b_o
+                          for i in tf.split(axis=0, num_or_size_splits=max_input_seq_length, value=rnn_output)])
 
         # Compute the prediction which is the best "path" of probabilities for each item of the batch
         decoded, _log_prob = tf.nn.ctc_beam_search_decoder(logits, self.input_seq_lengths)
@@ -250,33 +262,35 @@ class AcousticModel(object):
         self.learning_rate_decay_op = self.learning_rate.assign(tf.multiply(self.learning_rate, lr_decay_factor))
 
         # Compute the CTC loss between the logits and the truth for each item of the batch
-        ctc_loss = tf.nn.ctc_loss(logits, self.sparse_labels, self.input_seq_lengths)
+        with tf.name_scope('CTC'):
+            ctc_loss = tf.nn.ctc_loss(self.sparse_labels, logits, self.input_seq_lengths)
 
-        # Compute the mean loss of the batch (only used to check on progression in learning)
-        # The loss is averaged accross the batch but before we take into account the real size of the label
-        self.mean_loss = tf.reduce_mean(tf.truediv(ctc_loss, tf.to_float(self.input_seq_lengths)))
+            # Compute the mean loss of the batch (only used to check on progression in learning)
+            # The loss is averaged accross the batch but before we take into account the real size of the label
+            self.mean_loss = tf.reduce_mean(tf.truediv(ctc_loss, tf.to_float(self.input_seq_lengths)))
 
         # Compute the gradients
         trainable_variables = tf.trainable_variables()
-        opt = tf.train.AdamOptimizer(self.learning_rate)
-        gradients = opt.compute_gradients(ctc_loss, trainable_variables)
+        with tf.name_scope('Gradients'):
+            opt = tf.train.AdamOptimizer(self.learning_rate)
+            gradients = opt.compute_gradients(ctc_loss, trainable_variables)
 
-        # Define a list of variables to store the accumulated gradients between batchs
-        accumulated_gradients = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False)
-                                 for tv in trainable_variables]
+            # Define a list of variables to store the accumulated gradients between batchs
+            accumulated_gradients = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False)
+                                     for tv in trainable_variables]
 
-        # Define an op to reset the accumulated gradient
-        self.acc_gradients_zero_op = [tv.assign(tf.zeros_like(tv)) for tv in accumulated_gradients]
+            # Define an op to reset the accumulated gradient
+            self.acc_gradients_zero_op = [tv.assign(tf.zeros_like(tv)) for tv in accumulated_gradients]
 
-        # Define an op to accumulate the gradients calculated by the current batch with
-        # the accumulated gradients variable
-        self.accumulate_gradients_op = [accumulated_gradients[i].assign_add(gv[0])
-                                        for i, gv in enumerate(gradients)]
+            # Define an op to accumulate the gradients calculated by the current batch with
+            # the accumulated gradients variable
+            self.accumulate_gradients_op = [accumulated_gradients[i].assign_add(gv[0])
+                                            for i, gv in enumerate(gradients)]
 
-        # Define an op to apply the result of the accumulated gradients
-        clipped_gradients, _norm = tf.clip_by_global_norm(accumulated_gradients, grad_clip)
-        self.train_step_op = opt.apply_gradients([(clipped_gradients[i], gv[1]) for i, gv in enumerate(gradients)],
-                                                 global_step=self.global_step)
+            # Define an op to apply the result of the accumulated gradients
+            clipped_gradients, _norm = tf.clip_by_global_norm(accumulated_gradients, grad_clip)
+            self.train_step_op = opt.apply_gradients([(clipped_gradients[i], gv[1]) for i, gv in enumerate(gradients)],
+                                                     global_step=self.global_step)
         return
 
     def tensorboard_rnn(self, session, tensorboard_dir, tb_run_name):

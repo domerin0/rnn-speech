@@ -45,15 +45,16 @@ If you have already cloned the repository without lfs, you can download the miss
 ####Install dependencies
 #####Required
 
-1. [TensorFlow](https://www.tensorflow.org) (>= 0.12RC1)
+1. [TensorFlow](https://www.tensorflow.org) (>= 1.0)
 1. [librosa](https://github.com/librosa/librosa)
 
-Install [TensorFlow](https://www.tensorflow.org) by following the website documentation. GPU support is not
-mandatory but strongly recommended if you intend to train the RNN.
-
-Install other required dependencies by running :
+Install required dependencies by running :
 
     $ pip3 install -r requirements.txt
+
+GPU support is not mandatory but strongly recommended if you intend to train the RNN.
+Replace tensorflow by tensorflow-gpu in requirements.txt in order to install the GPU 
+version of TensorFlow.
 
 #####Optional
 1. sox (for live transcript only, install with `sudo apt-get install sox` or `brew install sox --with-flac`)
