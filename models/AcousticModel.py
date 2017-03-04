@@ -699,7 +699,7 @@ class AcousticModel(object):
 
         return input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch
 
-    def create_queue(self, sess, audio_processor, coord, dataset, queue_type):
+    def create_queue(self, sess, audio_processor, coord, dataset, queue_type, nb_iterations=1):
         start_from = 0
         capacity = min(self.batch_size * 10, len(dataset))
         if queue_type == 'train':
@@ -711,7 +711,7 @@ class AcousticModel(object):
                                                   [self.max_target_seq_length], []])
             # Calculate approximate position for learning batch, allow to keep consistency between multiple iterations
             # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
-            start_from = self.global_step.eval() * self.batch_size
+            start_from = self.global_step.eval() * self.batch_size * nb_iterations
             if start_from != 0:
                 logging.info("Start training from file number : %d", start_from)
         elif queue_type == 'test':
@@ -744,7 +744,8 @@ class AcousticModel(object):
               checkpoint_dir, nb_iterations=1, max_epoch=None):
         # Create a queue for each dataset and a coordinator
         coord = tf.train.Coordinator()
-        train_thread, train_dequeue_op = self.create_queue(sess, audio_processor, coord, train_set, 'train')
+        train_thread, train_dequeue_op = self.create_queue(sess, audio_processor, coord,
+                                                           train_set, 'train', nb_iterations)
         test_thread, test_dequeue_op = self.create_queue(sess, audio_processor, coord, test_set, 'test')
         threads = [train_thread, test_thread]
         for t in threads:
