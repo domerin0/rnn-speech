@@ -406,8 +406,11 @@ class AcousticModel(object):
         """
         # Convert int to values in self.char_map
         char_list = [self.char_map[index] for index in label if 0 <= index < len(self.char_map)]
-        # Remove eos character
-        char_list.remove(self.char_map[-1])
+        # Remove eos character if present
+        try:
+            char_list.remove(self.char_map[-1])
+        except ValueError:
+            pass
         # Add spaces in front of capitalized letters (except the first one) and lower every letter
         result = []
         for i in range(len(char_list)):
@@ -561,7 +564,9 @@ class AcousticModel(object):
             input_feed[self.output_keep_prob_ph] = 1.0
 
         # Actually run the tensorflow session
+        start_time = time.time()
         outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
+        logging.debug("Step duration : %.2f", time.time() - start_time)
 
         # If a tensorboard dir is configured then generate the summary for this operation
         if self.tensorboard_dir is not None:
@@ -747,7 +752,7 @@ class AcousticModel(object):
 
         previous_best_loss = None
         no_improvement_since = 0
-        step_time, mean_loss = 0.0, 0.0
+        mean_step_time, mean_loss = 0.0, 0.0
         current_step = 1
 
         # Main training loop
@@ -773,17 +778,18 @@ class AcousticModel(object):
             sess.run(self.train_step_op)
 
             # Step result
-            logging.info("Step %d with loss %.4f", current_step, step_loss / nb_iterations)
-            step_time += (time.time() - start_time) / steps_per_checkpoint
+            logging.info("Step %d with loss %.4f (duration : %.2f)", current_step, step_loss / nb_iterations,
+                         time.time() - start_time)
+            mean_step_time += (time.time() - start_time) / steps_per_checkpoint
             mean_loss += step_loss / nb_iterations / steps_per_checkpoint
 
             # Check if we are at a checkpoint
             if current_step % steps_per_checkpoint == 0:
                 logging.info("Global step %d / learning rate %.4f / step-time %.2f / loss %.2f",
-                             self.global_step.eval(), self.learning_rate.eval(), step_time, mean_loss)
+                             self.global_step.eval(), self.learning_rate.eval(), mean_step_time, mean_loss)
                 num_test_batches = self.get_num_batches(test_set)
                 chkpt_loss = self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
-                step_time, mean_loss = 0.0, 0.0
+                mean_step_time, mean_loss = 0.0, 0.0
 
                 if num_test_batches > 0:
                     # Decrease learning rate if the model is not improving. The model is not improving if the loss
