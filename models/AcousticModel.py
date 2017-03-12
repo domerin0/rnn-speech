@@ -95,10 +95,19 @@ class AcousticModel(object):
             # Declare object variables used as truth label for training the RNN
             self.sparse_labels = None
             # Declare object variables used as the output of the training operation
-            self.mean_loss = None
+            self.accumulated_mean_loss = None
+            self.acc_mean_loss_op = None
+            self.acc_mean_loss_zero_op = None
+            self.accumulated_error_rate = None
+            self.acc_error_rate_op = None
+            self.acc_error_rate_zero_op = None
             # Declare object variables used as a training parameter
             self.learning_rate = None
             self.global_step = None
+            # Declare object variables used to count the number of mini-batchs
+            self.mini_batch = None
+            self.increase_mini_batch_op = None
+            self.mini_batch_zero_op = None
             # Declare ops for training
             self.learning_rate_decay_op = None
             self.acc_gradients_zero_op = None
@@ -235,8 +244,14 @@ class AcousticModel(object):
         Build the training add-on of the Acoustic RNN
         This add-on offer ops that can be used to train the network
           self.learning_rate_decay_op : will decay the learning rate
+          self.acc_mean_loss_op : will compute the loss and accumulate it over multiple mini-batchs
+          self.acc_mean_loss_zero_op : will reset the loss accumulator to 0
+          self.acc_error_rate_op : will compute the error rate and accumulate it over multiple mini-batchs
+          self.acc_error_rate_zero_op : will reset the error_rate accumulator to 0
+          self.increase_mini_batch_op : will increase the mini-batchs counter
+          self.mini_batch_zero_op : will reset the mini-batchs counter
           self.acc_gradients_zero_op : will reset the gradients
-          self.accumulate_gradients_op : will compute the gradients and accumulate them over multiple batchs
+          self.accumulate_gradients_op : will compute the gradients and accumulate them over multiple mini-batchs
           self.train_step_op : will clip the accumulated gradients and apply them on the RNN
 
         Parameters
@@ -267,7 +282,29 @@ class AcousticModel(object):
 
             # Compute the mean loss of the batch (only used to check on progression in learning)
             # The loss is averaged accross the batch but before we take into account the real size of the label
-            self.mean_loss = tf.reduce_mean(tf.truediv(ctc_loss, tf.to_float(self.input_seq_lengths)))
+            mean_loss = tf.reduce_mean(tf.truediv(ctc_loss, tf.to_float(self.input_seq_lengths)))
+
+            # Set an accumulator to sum the loss between epochs
+            self.accumulated_mean_loss = tf.Variable(0.0, trainable=False)
+            self.acc_mean_loss_op = self.accumulated_mean_loss.assign_add(mean_loss)
+            self.acc_mean_loss_zero_op = self.accumulated_mean_loss.assign(tf.zeros_like(self.accumulated_mean_loss))
+
+        # Compute the error between the logits and the truth
+        with tf.name_scope('Error_Rate'):
+            error_rate = tf.reduce_mean(tf.edit_distance(self.prediction, self.sparse_labels, normalize=True))
+
+            # Set an accumulator to sum the error rate between epochs
+            self.accumulated_error_rate = tf.Variable(0.0, trainable=False)
+            self.acc_error_rate_op = self.accumulated_error_rate.assign_add(error_rate)
+            self.acc_error_rate_zero_op = self.accumulated_error_rate.assign(tf.zeros_like(self.accumulated_error_rate))
+
+        # Count epochs
+        with tf.name_scope('Mini_batch'):
+            # Set an accumulator to count the number of mini-batchs in a batch
+            # Note : variable is defined as float to avoid type conversion error using tf.divide
+            self.mini_batch = tf.Variable(0.0, trainable=False)
+            self.increase_mini_batch_op = self.mini_batch.assign_add(1)
+            self.mini_batch_zero_op = self.mini_batch.assign(tf.zeros_like(self.mini_batch))
 
         # Compute the gradients
         trainable_variables = tf.trainable_variables()
@@ -320,14 +357,15 @@ class AcousticModel(object):
 
         # Loss
         with tf.name_scope('Mean_loss'):
-            tf.summary.scalar('Training', self.mean_loss, collections=[graphkey_training])
-            tf.summary.scalar('Test', self.mean_loss, collections=[graphkey_test])
+            mean_loss = tf.divide(self.accumulated_mean_loss, self.mini_batch)
+            tf.summary.scalar('Training', mean_loss, collections=[graphkey_training])
+            tf.summary.scalar('Test', mean_loss, collections=[graphkey_test])
 
         # Accuracy
         with tf.name_scope('Accuracy_-_Error_Rate'):
-            error_rate = tf.reduce_mean(tf.edit_distance(self.prediction, self.sparse_labels, normalize=True))
-            tf.summary.scalar('Training', error_rate, collections=[graphkey_training])
-            tf.summary.scalar('Test', error_rate, collections=[graphkey_test])
+            mean_error_rate = tf.divide(self.accumulated_error_rate, self.mini_batch)
+            tf.summary.scalar('Training', mean_error_rate, collections=[graphkey_training])
+            tf.summary.scalar('Test', mean_error_rate, collections=[graphkey_test])
 
         self.train_summaries_op = tf.summary.merge_all(key=graphkey_training)
         self.test_summaries_op = tf.summary.merge_all(key=graphkey_test)
@@ -536,21 +574,15 @@ class AcousticModel(object):
         input_feed = {self.inputs: input_feat_vecs, self.input_seq_lengths: mfcc_lengths_batch,
                       self.sparse_labels: tf.SparseTensorValue(label_indices_batch, label_values_batch,
                                                                [self.batch_size, self.max_target_seq_length])}
-        # Base output is ctc_loss and mean_loss
-        output_feed = [self.mean_loss]
+        # Base output is mean_loss
+        output_feed = [self.acc_mean_loss_op, self.acc_error_rate_op, self.increase_mini_batch_op]
 
-        # If a tensorboard dir is configured then add a merged_summaries operation
-        run_options = run_metadata = None
-        if self.tensorboard_dir is not None:
-            if is_training:
-                output_feed.append(self.train_summaries_op)
-            else:
-                output_feed.append(self.test_summaries_op)
-
-            # Add timeline data generation options if needed
-            if self.timeline_enabled is True:
-                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-                run_metadata = tf.RunMetadata()
+        # Add timeline data generation options if needed
+        if self.timeline_enabled is True:
+            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+            run_metadata = tf.RunMetadata()
+        else:
+            run_options = run_metadata = None
 
         if is_training:
             # If in training then add the update operation
@@ -565,24 +597,50 @@ class AcousticModel(object):
 
         # Actually run the tensorflow session
         start_time = time.time()
-        outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
+        session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
         logging.debug("Step duration : %.2f", time.time() - start_time)
 
-        # If a tensorboard dir is configured then generate the summary for this operation
+        # Produce the timeline if needed
+        if (self.tensorboard_dir is not None) and (self.timeline_enabled is True):
+            # Create the Timeline object, and write it to a json
+            from tensorflow.python.client import timeline
+            tl = timeline.Timeline(run_metadata.step_stats)
+            ctf = tl.generate_chrome_trace_format()
+            with open(self.tensorboard_dir + '/' + 'timeline.json', 'w') as f:
+                logging.info("Writing to timeline.json")
+                f.write(ctf)
+
+        return
+
+    def start_batch(self, session, is_training):
+        output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op, self.mini_batch_zero_op]
+
+        if is_training:
+            output.append(self.acc_gradients_zero_op)
+
+        session.run(output)
+        return
+
+    def end_batch(self, session, is_training):
+        # Apply the gradients
+        session.run(self.train_step_op)
+
+        # Get each accumulator's value and compute the mean for the epoch
+        accumulated_loss, accumulated_error_rate, batchs_count, global_step =\
+            session.run([self.accumulated_mean_loss, self.accumulated_error_rate,
+                         self.mini_batch, self.global_step])
+        mean_loss = accumulated_loss / batchs_count
+        mean_error_rate = accumulated_error_rate / batchs_count
+
+        # If a tensorboard dir is configured then run the merged_summaries operation
         if self.tensorboard_dir is not None:
-            self.summary_writer_op.add_summary(outputs[1], self.global_step.eval())
+            if is_training:
+                summary = session.run(self.train_summaries_op)
+            else:
+                summary = session.run(self.test_summaries_op)
+            self.summary_writer_op.add_summary(summary, global_step)
 
-            # ...and produce the timeline if needed
-            if self.timeline_enabled is True:
-                # Create the Timeline object, and write it to a json
-                from tensorflow.python.client import timeline
-                tl = timeline.Timeline(run_metadata.step_stats)
-                ctf = tl.generate_chrome_trace_format()
-                with open(self.tensorboard_dir + '/' + 'timeline.json', 'w') as f:
-                    logging.info("Writing to timeline.json")
-                    f.write(ctf)
-
-        return outputs[0]
+        return mean_loss, mean_error_rate, global_step
 
     def process_input(self, session, inputs, input_seq_lengths):
         """
@@ -602,21 +660,24 @@ class AcousticModel(object):
         # Save the model
         checkpoint_path = os.path.join(checkpoint_dir, "acousticmodel.ckpt")
         self.saver.save(sess, checkpoint_path, global_step=self.global_step)
+        logging.info("Checkpoint saved")
 
         # Run a test set against the current model
-        mean_loss = 0.0
+        mean_loss = mean_error_rate = 0.0
         if num_test_batches > 0:
             logging.info("Test set - Will proceed to %d iterations", num_test_batches)
+            self.start_batch(sess, False)
+
             for i in range(num_test_batches):
                 logging.debug("On %dth iteration of the test set", i)
                 input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch = \
                     self.dequeue_data(sess, dequeue_op)
+                self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch, False)
 
-                step_loss = self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
-                                      label_indices_batch, False)
-                mean_loss += step_loss / num_test_batches
-            logging.info("Finished test set - resulting loss is %.2f", mean_loss)
-        return mean_loss
+            mean_loss, mean_error_rate, _ = self.end_batch(sess, False)
+            logging.info("Finished test set - resulting loss is %.2f - resulting error rate is %.2f",
+                         mean_loss, mean_error_rate)
+        return mean_loss, mean_error_rate
 
     def enqueue_data(self, coord, sess, audio_processor, t_local_data, enqueue_op, dataset,
                      mfcc_input, mfcc_input_length, label, label_length, start_from=0):
@@ -699,7 +760,7 @@ class AcousticModel(object):
 
         return input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch
 
-    def create_queue(self, sess, audio_processor, coord, dataset, queue_type, nb_iterations=1):
+    def create_queue(self, sess, audio_processor, coord, dataset, queue_type, mini_batch_size=1):
         start_from = 0
         capacity = min(self.batch_size * 10, len(dataset))
         if queue_type == 'train':
@@ -709,9 +770,9 @@ class AcousticModel(object):
             queue = tf.RandomShuffleQueue(capacity, min_after_dequeue, [tf.int32, tf.int32, tf.int32, tf.int32],
                                           shapes=[[self.max_input_seq_length, self.input_dim], [],
                                                   [self.max_target_seq_length], []])
-            # Calculate approximate position for learning batch, allow to keep consistency between multiple iterations
+            # Calculate approximate position for learning batch, allow to keep consistency between multiple runs
             # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
-            start_from = self.global_step.eval() * self.batch_size * nb_iterations
+            start_from = self.global_step.eval() * self.batch_size * mini_batch_size
             if start_from != 0:
                 logging.info("Start training from file number : %d", start_from)
         elif queue_type == 'test':
@@ -741,11 +802,11 @@ class AcousticModel(object):
         return thread, dequeue_op
 
     def train(self, sess, audio_processor, test_set, train_set, steps_per_checkpoint,
-              checkpoint_dir, nb_iterations=1, max_epoch=None):
+              checkpoint_dir, mini_batch_size=1, max_steps=None):
         # Create a queue for each dataset and a coordinator
         coord = tf.train.Coordinator()
         train_thread, train_dequeue_op = self.create_queue(sess, audio_processor, coord,
-                                                           train_set, 'train', nb_iterations)
+                                                           train_set, 'train', mini_batch_size)
         test_thread, test_dequeue_op = self.create_queue(sess, audio_processor, coord, test_set, 'test')
         threads = [train_thread, test_thread]
         for t in threads:
@@ -753,52 +814,50 @@ class AcousticModel(object):
 
         previous_best_loss = None
         no_improvement_since = 0
-        mean_step_time, mean_loss = 0.0, 0.0
-        current_step = 1
+        mean_step_time = 0.0
 
         # Main training loop
         while True:
             if coord.should_stop():
                 break
 
-            step_loss = 0.0
             start_time = time.time()
 
-            # Set accumulated gradients to zeros
-            sess.run(self.acc_gradients_zero_op)
+            # Start a new batch
+            self.start_batch(sess, True)
 
-            # Run multiple batchs
-            for i in range(nb_iterations):
+            # Run multiple mini-batchs inside an batch
+            for i in range(mini_batch_size):
                 input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch =\
                     self.dequeue_data(sess, train_dequeue_op)
 
                 # Run a step on a batch and keep the loss
-                step_loss += self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
-                                       label_indices_batch, True)
-            # Apply the gradients
-            sess.run(self.train_step_op)
+                self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch, True)
+            # Close the batch
+            mean_loss, mean_error_rate, current_step = self.end_batch(sess, True)
 
             # Step result
-            logging.info("Step %d with loss %.4f (duration : %.2f)", current_step, step_loss / nb_iterations,
-                         time.time() - start_time)
+            logging.info("Batch %d : loss %.4f - error_rate %.4f - duration %.2f",
+                         current_step, mean_loss, mean_error_rate, time.time() - start_time)
             mean_step_time += (time.time() - start_time) / steps_per_checkpoint
-            mean_loss += step_loss / nb_iterations / steps_per_checkpoint
 
             # Check if we are at a checkpoint
             if current_step % steps_per_checkpoint == 0:
-                logging.info("Global step %d / learning rate %.4f / step-time %.2f / loss %.2f",
-                             self.global_step.eval(), self.learning_rate.eval(), mean_step_time, mean_loss)
+                logging.info("Checkpoint : batch %d - learning rate %.7f - mean step-time %.2f",
+                             current_step, self.learning_rate.eval(), mean_step_time)
                 num_test_batches = self.get_num_batches(test_set)
-                chkpt_loss = self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
-                mean_step_time, mean_loss = 0.0, 0.0
+                chkpt_loss, _ = self.run_checkpoint(sess, checkpoint_dir, num_test_batches, test_dequeue_op)
+                mean_step_time = 0.0
 
                 if num_test_batches > 0:
                     # Decrease learning rate if the model is not improving. The model is not improving if the loss
-                    # does not get better after two iterations. This way it allow for a temporary degradation but it
+                    # does not get better after two batchs. This way it allow for a temporary degradation but it
                     # must improve, otherwise it means that the model is probably oscillating
                     if (previous_best_loss is not None) and (chkpt_loss >= previous_best_loss):
                         no_improvement_since += 1
+                        logging.debug("No improvement on the loss")
                         if no_improvement_since == 2:
+                            logging.info("Decreasing learning rate (previous value : %.4f)", self.learning_rate.eval())
                             sess.run(self.learning_rate_decay_op)
                             no_improvement_since = 0
                             previous_best_loss = chkpt_loss
@@ -806,11 +865,11 @@ class AcousticModel(object):
                                 # End learning process
                                 break
                     else:
+                        logging.debug("Loss improved")
                         no_improvement_since = 0
                         previous_best_loss = chkpt_loss
 
-            current_step += 1
-            if (max_epoch is not None) and (current_step > max_epoch):
+            if (max_steps is not None) and (current_step > max_steps):
                 # We have reached the maximum allowed, we should exit at the end of this run
                 break
 
