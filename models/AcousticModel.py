@@ -86,6 +86,8 @@ class AcousticModel(object):
         self.hidden_state = None
         # Declare object variable used as the RNN output
         self.prediction = None
+        # Declare an op to reset the RNN internal state
+        self.rnn_state_zero_op = None
         # Build the RNN
         logits = self.build_base_rnn(hidden_size, num_layers, num_labels, input_dim, batch_size,
                                      max_input_seq_length, forward_only, normalization)
@@ -214,13 +216,20 @@ class AcousticModel(object):
                 rnn_inputs = tf.nn.batch_normalization(rnn_inputs, batch_mean, batch_var, None, None,
                                                        epsilon, name="batch_norm")
 
-        # Set the RNN initial state to 0s
-        init_state = cell.zero_state(batch_size, tf.float32)
+        # Define a variable to store the RNN state
+        self.hidden_state = tf.Variable(tf.zeros((num_layers, 2, batch_size, hidden_size)), trainable=False)
+        # Arrange it to a tuple of LSTMStateTuple as needed
+        l = tf.unstack(self.hidden_state, axis=0)
+        rnn_tuple_state = tuple([tf.contrib.rnn.LSTMStateTuple(l[idx][0], l[idx][1])
+                                for idx in range(num_layers)])
+
+        # Define an op to reset the accumulated gradient
+        self.rnn_state_zero_op = self.hidden_state.assign(tf.zeros_like(self.hidden_state))
 
         # Build the RNN
         with tf.name_scope('LSTM'):
-            rnn_output, self.hidden_state = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=self.input_seq_lengths,
-                                                              initial_state=init_state, time_major=True)
+            rnn_output, _ = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=self.input_seq_lengths,
+                                              initial_state=rnn_tuple_state, time_major=True)
 
         # Build the output layer between the RNN and the char_map
         with tf.name_scope('Output_layer'):
@@ -284,7 +293,7 @@ class AcousticModel(object):
             # The loss is averaged accross the batch but before we take into account the real size of the label
             mean_loss = tf.reduce_mean(tf.truediv(ctc_loss, tf.to_float(self.input_seq_lengths)))
 
-            # Set an accumulator to sum the loss between epochs
+            # Set an accumulator to sum the loss between mini-batchs
             self.accumulated_mean_loss = tf.Variable(0.0, trainable=False)
             self.acc_mean_loss_op = self.accumulated_mean_loss.assign_add(mean_loss)
             self.acc_mean_loss_zero_op = self.accumulated_mean_loss.assign(tf.zeros_like(self.accumulated_mean_loss))
@@ -293,12 +302,12 @@ class AcousticModel(object):
         with tf.name_scope('Error_Rate'):
             error_rate = tf.reduce_mean(tf.edit_distance(self.prediction, self.sparse_labels, normalize=True))
 
-            # Set an accumulator to sum the error rate between epochs
+            # Set an accumulator to sum the error rate between mini-batchs
             self.accumulated_error_rate = tf.Variable(0.0, trainable=False)
             self.acc_error_rate_op = self.accumulated_error_rate.assign_add(error_rate)
             self.acc_error_rate_zero_op = self.accumulated_error_rate.assign(tf.zeros_like(self.accumulated_error_rate))
 
-        # Count epochs
+        # Count mini-batchs
         with tf.name_scope('Mini_batch'):
             # Set an accumulator to count the number of mini-batchs in a batch
             # Note : variable is defined as float to avoid type conversion error using tf.divide
@@ -613,7 +622,8 @@ class AcousticModel(object):
         return
 
     def start_batch(self, session, is_training):
-        output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op, self.mini_batch_zero_op]
+        output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op,
+                  self.mini_batch_zero_op, self.rnn_state_zero_op]
 
         if is_training:
             output.append(self.acc_gradients_zero_op)
@@ -625,7 +635,7 @@ class AcousticModel(object):
         # Apply the gradients
         session.run(self.train_step_op)
 
-        # Get each accumulator's value and compute the mean for the epoch
+        # Get each accumulator's value and compute the mean for the batch
         accumulated_loss, accumulated_error_rate, batchs_count, global_step =\
             session.run([self.accumulated_mean_loss, self.accumulated_error_rate,
                          self.mini_batch, self.global_step])
