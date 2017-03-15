@@ -685,7 +685,7 @@ class AcousticModel(object):
                 self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch, False)
 
             mean_loss, mean_error_rate, _ = self.end_batch(sess, False)
-            logging.info("Finished test set - resulting loss is %.2f - resulting error rate is %.2f",
+            logging.info("Finished test set - resulting loss is %.5f - resulting error rate is %.5f",
                          mean_loss, mean_error_rate)
         return mean_loss, mean_error_rate
 
@@ -847,7 +847,7 @@ class AcousticModel(object):
             mean_loss, mean_error_rate, current_step = self.end_batch(sess, True)
 
             # Step result
-            logging.info("Batch %d : loss %.4f - error_rate %.4f - duration %.2f",
+            logging.info("Batch %d : loss %.5f - error_rate %.5f - duration %.2f",
                          current_step, mean_loss, mean_error_rate, time.time() - start_time)
             mean_step_time += (time.time() - start_time) / steps_per_checkpoint
 
@@ -867,7 +867,7 @@ class AcousticModel(object):
                         no_improvement_since += 1
                         logging.debug("No improvement on the loss")
                         if no_improvement_since == 2:
-                            logging.info("Decreasing learning rate (previous value : %.4f)", self.learning_rate.eval())
+                            logging.info("Decreasing learning rate (previous value : %.7f)", self.learning_rate.eval())
                             sess.run(self.learning_rate_decay_op)
                             no_improvement_since = 0
                             previous_best_loss = chkpt_loss
