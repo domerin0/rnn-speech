@@ -1,12 +1,13 @@
 # English pre-trained model
 
-This directory contain a trained english acoustic model (53.000 steps of 10 files batches).
+This directory contain a trained english acoustic model : 9.400 steps of 30 files batches 
+(10 mini-batchs of 3 files for each step).
 
-__Warning :__ This model use 3 layers, default is 2 in config file
+__Warning :__ This model use 3 layers, default is 5 in config file
 
-Results on LibriSpeech's test-clean evaluation set :
-* __CER : 21,3 %__
-* __WER : 56,2 %__
+Results on LibriSpeech's test-clean evaluation set (with max_input_seq_length : 3510):
+* __CER : 19,5 %__
+* __WER : 52 %__
 
 
 ### Dataset
@@ -37,18 +38,20 @@ Then make sure to set those parameters in your config file :
 
     [acoustic_network_params]
     num_layers : 3
-    hidden_size : 768
+    hidden_size : 1024
     dropout_input_keep_prob : 0.8
     dropout_output_keep_prob : 0.5
-    batch_size : 10
+    batch_size : 3
+    mini_batch_size : 10
     learning_rate : 0.0003
     lr_decay_factor : 0.33
-    grad_clip : 5
+    grad_clip : 1
     signal_processing : fbank
+    language : english
         
     [general]
     use_config_file_if_checkpoint_exists : True
-    steps_per_checkpoint : 1000
+    steps_per_checkpoint : 100
     checkpoint_dir : trained_models/acoustic_model/english
         
     [training]
@@ -86,9 +89,8 @@ Launch training and wait...
 
 ### Training graphs
 
-The learning rate was initialized at 0.0003 and was lowered when result on the test set did not improve.
-A bug prevented it to drop from steps 6.000 to 34.000. Training was stopped and relaunched at 34.000 after the
-bug was fixed.
+The learning rate was initialized at 0.0003 and was lowered when result on the test set did not improve two times
+in a row
 ![Learning rate](learning_rate.png)
 
 
