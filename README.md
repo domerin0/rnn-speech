@@ -1,7 +1,7 @@
 # rnn-speech
 Character level speech recognizer using ctc loss with deep rnns in TensorFlow.
 
-###About
+### About
 
 This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the
 [paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level
@@ -21,7 +21,7 @@ Results on LibriSpeech's test-clean evaluation set for the pre-trained model is 
 
 It lacks the character-level language model which is still in the works.
 
-###Data
+### Data
 
 The datasets currently supported are :
 * [LibriSpeech](http://www.openslr.org/12/) by Vassil Panayotov
@@ -31,8 +31,8 @@ The datasets currently supported are :
 
 The data is fed through two pipelines, one for testing, and the other for training.
 
-###How to Run
-####Cloning the repository
+### How to Run
+#### Cloning the repository
 If you intend to use a pre-trained model you should clone the repository with the
 [lfs plugin](https://git-lfs.github.com/)
 
@@ -43,8 +43,8 @@ If you have already cloned the repository without lfs, you can download the miss
     $ git lfs pull
 
 
-####Install dependencies
-#####Required
+#### Install dependencies
+##### Required
 
 1. [TensorFlow](https://www.tensorflow.org) (>= 1.0)
 1. [librosa](https://github.com/librosa/librosa)
@@ -57,13 +57,13 @@ GPU support is not mandatory but strongly recommended if you intend to train the
 Replace tensorflow by tensorflow-gpu in requirements.txt in order to install the GPU 
 version of TensorFlow.
 
-#####Optional
+##### Optional
 1. sox (for live transcript only, install with `sudo apt-get install sox` or `brew install sox --with-flac`)
 1. libcupti (for timeline only, install with : `sudo apt-get install libcupti-dev`)
 1. pyaudio (for live transcript only, install with : `sudo apt-get install python3-pyaudio`)
 
 
-####Run data preparation Script
+#### Run data preparation Script
 
 I've prepared a bash script to download LibriSpeech (~700mb) and extract the data to the right place :
 
@@ -81,7 +81,7 @@ program using something like:
 
 You should ensure it follows the same format as the one provided.
 
-####Running Optimizer
+#### Running Optimizer
 Once your dependencies are set up, and data is downloaded and extracted into the appropriate location,
 the optimizer can be started by doing :
 
@@ -91,27 +91,27 @@ Dynamic RNNs are used as memory consumption on the entirely unrolled network was
 30 minutes to build. Unfortunately this comes at a cost to speed, but I think in this case the tradeoff is worth it
 (as the model can now fit on a single GPU).
 
-####Running the network
+#### Running the network
 You can also use a trained network to process a wav file
 
     $ python stt.py --file "path_to_file.wav"
 
 The result will be printed on standard input.
 
-####Evaluating the network
+#### Evaluating the network
 You can evaluate a trained network on a evaluation test set (config.ini file's _test_dataset_dirs_ parameter)
 
     $ python stt.py --evaluate
 
 The resulting CER (character error rate) and WER (word error rate) will be printed on standard input.
 
-####Analysing performance
+#### Analysing performance
 You can add the `--timeline` option in order to produce a timeline file and see how everything is going.
 
 The resulting file will be overridden at each step. It can be opened with Chrome, opening `chrome://tracing/` and
 loading the file.
 
-###Project Road Map
+### Project Road Map
 
 With verification and testing performed somewhere at every step:
 
@@ -123,12 +123,12 @@ With verification and testing performed somewhere at every step:
 Ultimately I'd like to work towards bridging this with my other project
 [neural-chatbot](https://github.com/inikdom/neural-chatbot) to make an open-source natural conversational engine.
 
-###License
+### License
 
 MIT
 
 
-###References
+### References
 #### LibriSpeech
 ````
 "LibriSpeech: an ASR corpus based on public domain audio books", Vassil Panayotov, Guoguo Chen, Daniel Povey andSanjeev Khudanpur, ICASSP 2015
@@ -139,7 +139,7 @@ MIT
 http://shtooka.net
 ````
 
-####Vystadial 2013
+#### Vystadial 2013
 ````
 Korvas, Matěj; Plátek, Ondřej; Dušek, Ondřej; Žilka, Lukáš and Jurčíček, Filip, 2014, Vystadial 2013 – Czech data,
 LINDAT/CLARIN digital library at Institute of Formal and Applied Linguistics, Charles University in Prague,
