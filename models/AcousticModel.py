@@ -14,6 +14,7 @@ Acoustic RNN trained with ctc loss
 """
 
 import tensorflow as tf
+from tensorflow.python.client import timeline
 import numpy as np
 import time
 import os
@@ -574,8 +575,8 @@ class AcousticModel(object):
     def get_num_batches(self, dataset):
         return len(dataset) // self.batch_size
 
-    def step(self, session, input_feat_vecs, mfcc_lengths_batch,
-             label_values_batch, label_indices_batch, is_training):
+    def step(self, session, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
+             label_indices_batch, is_training, run_options=None, run_metadata=None):
         """
         Returns:
         mean of ctc_loss
@@ -585,13 +586,6 @@ class AcousticModel(object):
                                                                [self.batch_size, self.max_target_seq_length])}
         # Base output is mean_loss
         output_feed = [self.acc_mean_loss_op, self.acc_error_rate_op, self.increase_mini_batch_op]
-
-        # Add timeline data generation options if needed
-        if self.timeline_enabled is True:
-            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-            run_metadata = tf.RunMetadata()
-        else:
-            run_options = run_metadata = None
 
         if is_training:
             # If in training then add the update operation
@@ -609,47 +603,38 @@ class AcousticModel(object):
         session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
         logging.debug("Step duration : %.2f", time.time() - start_time)
 
-        # Produce the timeline if needed
-        if (self.tensorboard_dir is not None) and (self.timeline_enabled is True):
-            # Create the Timeline object, and write it to a json
-            from tensorflow.python.client import timeline
-            tl = timeline.Timeline(run_metadata.step_stats)
-            ctf = tl.generate_chrome_trace_format()
-            with open(self.tensorboard_dir + '/' + 'timeline.json', 'w') as f:
-                logging.info("Writing to timeline.json")
-                f.write(ctf)
-
         return
 
-    def start_batch(self, session, is_training):
+    def start_batch(self, session, is_training, run_options=None, run_metadata=None):
         output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op,
                   self.mini_batch_zero_op, self.rnn_state_zero_op]
 
         if is_training:
             output.append(self.acc_gradients_zero_op)
 
-        session.run(output)
+        session.run(output, options=run_options, run_metadata=run_metadata)
         return
 
-    def end_batch(self, session, is_training):
-        # Apply the gradients
-        session.run(self.train_step_op)
-
-        # Get each accumulator's value and compute the mean for the batch
-        accumulated_loss, accumulated_error_rate, batchs_count, global_step =\
-            session.run([self.accumulated_mean_loss, self.accumulated_error_rate,
-                         self.mini_batch, self.global_step])
-        mean_loss = accumulated_loss / batchs_count
-        mean_error_rate = accumulated_error_rate / batchs_count
+    def end_batch(self, session, is_training, run_options=None, run_metadata=None):
+        # Apply the gradients and get each accumulator's value and compute the mean for the batch
+        output_feed = [self.accumulated_mean_loss, self.accumulated_error_rate,
+                       self.mini_batch, self.global_step, self.train_step_op]
 
         # If a tensorboard dir is configured then run the merged_summaries operation
         if self.tensorboard_dir is not None:
             if is_training:
-                summary = session.run(self.train_summaries_op)
+                output_feed.append(self.train_summaries_op)
             else:
-                summary = session.run(self.test_summaries_op)
+                output_feed.append(self.test_summaries_op)
+            accumulated_loss, accumulated_error_rate, batchs_count, global_step, _, summary =\
+                session.run(output_feed, options=run_options, run_metadata=run_metadata)
             self.summary_writer_op.add_summary(summary, global_step)
+        else:
+            accumulated_loss, accumulated_error_rate, batchs_count, global_step, _ =\
+                session.run(output_feed, options=run_options, run_metadata=run_metadata)
 
+        mean_loss = accumulated_loss / batchs_count
+        mean_error_rate = accumulated_error_rate / batchs_count
         return mean_loss, mean_error_rate, global_step
 
     def process_input(self, session, inputs, input_seq_lengths):
@@ -689,8 +674,8 @@ class AcousticModel(object):
                          mean_loss, mean_error_rate)
         return mean_loss, mean_error_rate
 
-    def enqueue_data(self, coord, sess, audio_processor, t_local_data, enqueue_op, dataset,
-                     mfcc_input, mfcc_input_length, label, label_length, start_from=0):
+    def enqueue_data(self, coord, sess, audio_processor, t_local_data, enqueue_op, dataset, mfcc_input,
+                     mfcc_input_length, label, label_length, start_from=0, run_options=None, run_metadata=None):
         # Make a local copy of the dataset and set the reading index
         t_local_data.dataset = dataset[:]
         t_local_data.current_pos = start_from
@@ -738,19 +723,20 @@ class AcousticModel(object):
                 sess.run(enqueue_op, feed_dict={mfcc_input: t_local_data.mfcc_data,
                                                 mfcc_input_length: t_local_data.original_mfcc_length,
                                                 label: t_local_data.label_data,
-                                                label_length: t_local_data.label_data_length})
-            except Exception as e:
-                # The queue may have been cancelled so we should stop
-                coord.request_stop(e)
+                                                label_length: t_local_data.label_data_length},
+                         options=run_options, run_metadata=run_metadata)
+            except tf.errors.CancelledError:
+                # The queue have been cancelled so we should stop
                 break
 
             # Go to next file on the list
             t_local_data.current_pos += 1
 
     @staticmethod
-    def dequeue_data(sess, dequeue_op):
+    def dequeue_data(sess, dequeue_op, run_options=None, run_metadata=None):
         # Get data from the queue
-        mfcc_batch, mfcc_lengths_batch, label_batch, label_lengths_batch = sess.run(dequeue_op)
+        mfcc_batch, mfcc_lengths_batch, label_batch, label_lengths_batch = sess.run(dequeue_op, options=run_options,
+                                                                                    run_metadata=run_metadata)
 
         # Transpose mfcc_batch in order to get time serie as first dimension
         # [batch_size, time_serie, input_dim] ====> [time_serie, batch_size, input_dim]
@@ -807,17 +793,30 @@ class AcousticModel(object):
         thread_local_data = threading.local()
         thread = threading.Thread(name=queue_type + "_enqueue", target=self.enqueue_data,
                                   args=(coord, sess, audio_processor, thread_local_data, enqueue_op, dataset,
-                                        mfcc_input, mfcc_input_length, label, label_length,
-                                        start_from))
-        return thread, dequeue_op
+                                        mfcc_input, mfcc_input_length, label, label_length, start_from))
+        return thread, queue, dequeue_op
+
+    def write_timeline(self, run_metadata, inter_time, action=""):
+        logging.debug("--- Action %s duration : %.4f", action, time.time() - inter_time)
+
+        if self.tensorboard_dir is None:
+            # A tensorboard_dir is needed
+            return
+
+        # Create the Timeline object, and write it to a json
+        trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+        logging.info('Writing to timeline-' + action + '.ctf.json')
+        with open(self.tensorboard_dir + '/' + 'timeline-' + action + '.ctf.json', 'w') as trace_file:
+            trace_file.write(trace.generate_chrome_trace_format())
+        return time.time()
 
     def train(self, sess, audio_processor, test_set, train_set, steps_per_checkpoint,
-              checkpoint_dir, mini_batch_size=1, max_steps=None):
+              checkpoint_dir, mini_batch_size=1, max_steps=None, run_options=None, run_metadata=None):
         # Create a queue for each dataset and a coordinator
         coord = tf.train.Coordinator()
-        train_thread, train_dequeue_op = self.create_queue(sess, audio_processor, coord,
-                                                           train_set, 'train', mini_batch_size)
-        test_thread, test_dequeue_op = self.create_queue(sess, audio_processor, coord, test_set, 'test')
+        train_thread, train_queue, train_dequeue_op = self.create_queue(sess, audio_processor, coord,
+                                                                        train_set, 'train', mini_batch_size)
+        test_thread, test_queue, test_dequeue_op = self.create_queue(sess, audio_processor, coord, test_set, 'test')
         threads = [train_thread, test_thread]
         for t in threads:
             t.start()
@@ -831,20 +830,34 @@ class AcousticModel(object):
             if coord.should_stop():
                 break
 
-            start_time = time.time()
+            start_time = inter_time = time.time()
 
             # Start a new batch
-            self.start_batch(sess, True)
+            self.start_batch(sess, True, run_options=run_options, run_metadata=run_metadata)
+
+            if self.timeline_enabled:
+                inter_time = self.write_timeline(run_metadata, inter_time, "start_batch")
 
             # Run multiple mini-batchs inside an batch
             for i in range(mini_batch_size):
                 input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch =\
-                    self.dequeue_data(sess, train_dequeue_op)
+                    self.dequeue_data(sess, train_dequeue_op, run_options=run_options, run_metadata=run_metadata)
+
+                if self.timeline_enabled:
+                    inter_time = self.write_timeline(run_metadata, inter_time, "dequeue-" + str(i))
 
                 # Run a step on a batch and keep the loss
-                self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch, label_indices_batch, True)
+                self.step(sess, input_feat_vecs, mfcc_lengths_batch, label_values_batch,
+                          label_indices_batch, True, run_options=run_options, run_metadata=run_metadata)
+
+                if self.timeline_enabled:
+                    inter_time = self.write_timeline(run_metadata, inter_time, "step-" + str(i))
+
             # Close the batch
-            mean_loss, mean_error_rate, current_step = self.end_batch(sess, True)
+            mean_loss, mean_error_rate, current_step = self.end_batch(sess, True, run_options=run_options,
+                                                                      run_metadata=run_metadata)
+            if self.timeline_enabled:
+                _ = self.write_timeline(run_metadata, inter_time, "end_batch")
 
             # Step result
             logging.info("Batch %d : loss %.5f - error_rate %.5f - duration %.2f",
@@ -879,13 +892,13 @@ class AcousticModel(object):
                         no_improvement_since = 0
                         previous_best_loss = chkpt_loss
 
-            if (max_steps is not None) and (current_step > max_steps):
+            if (max_steps is not None) and (current_step >= max_steps):
                 # We have reached the maximum allowed, we should exit at the end of this run
                 break
 
         # Stop the queues
-        sess.run(train_dequeue_op.close(cancel_pending_enqueues=True))
-        sess.run(test_dequeue_op.close(cancel_pending_enqueues=True))
+        sess.run(train_queue.close(cancel_pending_enqueues=True))
+        sess.run(test_queue.close(cancel_pending_enqueues=True))
         # Ask the threads to stop.
         coord.request_stop()
         # And wait for them to actually do it.

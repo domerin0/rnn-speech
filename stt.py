@@ -55,7 +55,21 @@ def train_rnn(audio_processor, hyper_params, prog_params):
     logging.info("Using %d files in train set", len(train_set))
     logging.info("Using %d size of test set", len(test_set))
 
-    with tf.Session() as sess:
+    config = tf.ConfigProto()
+    jit_level = 0
+    if prog_params["XLA"]:
+        # Turns on XLA JIT compilation.
+        jit_level = tf.OptimizerOptions.ON_1
+    config.graph_options.optimizer_options.global_jit_level = jit_level
+    run_metadata = tf.RunMetadata()
+
+    # Add timeline data generation options if needed
+    if prog_params["timeline"] is True:
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    else:
+        run_options = None
+
+    with tf.Session(config=config) as sess:
         # create model
         model = create_acoustic_model(sess, hyper_params, hyper_params["batch_size"],
                                       forward_only=False, tensorboard_dir=hyper_params["tensorboard_dir"],
@@ -63,12 +77,12 @@ def train_rnn(audio_processor, hyper_params, prog_params):
         # Override the learning rate if given on the command line
         if prog_params["learn_rate"] is not None:
             assign_op = model.learning_rate.assign(prog_params["learn_rate"])
-            sess.run(assign_op)
+            sess.run(assign_op, options=run_options, run_metadata=run_metadata)
 
         logging.info("Start training...")
         model.train(sess, audio_processor, test_set, train_set, hyper_params["steps_per_checkpoint"],
                     hyper_params["checkpoint_dir"], mini_batch_size=hyper_params["mini_batch_size"],
-                    max_steps=prog_params["max_epoch"])
+                    max_steps=prog_params["max_epoch"], run_options=run_options, run_metadata=run_metadata)
 
 
 def process_file(audio_processor, hyper_params, file):
@@ -226,6 +240,8 @@ def parse_args():
     parser.add_argument('--timeline', dest='timeline', action='store_true',
                         help='Generate a json file with the timeline (a tensorboard directory'
                              'must be provided in config file)')
+    parser.set_defaults(XLA=False)
+    parser.add_argument('--XLA', dest='XLA', action='store_true', help='Activate XLA mode in tensorflow')
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.set_defaults(train=False)
@@ -240,7 +256,7 @@ def parse_args():
     args = parser.parse_args()
     prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'max_epoch': args.max_epoch,
                    'learn_rate': args.learn_rate, 'timeline': args.timeline, 'train': args.train,
-                   'file': args.file, 'record': args.record, 'evaluate': args.evaluate}
+                   'file': args.file, 'record': args.record, 'evaluate': args.evaluate, 'XLA': args.XLA}
     return prog_params
 
 
