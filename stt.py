@@ -71,18 +71,44 @@ def train_rnn(audio_processor, hyper_params, prog_params):
 
     with tf.Session(config=config) as sess:
         # create model
-        model = create_acoustic_model(sess, hyper_params, hyper_params["batch_size"],
-                                      forward_only=False, tensorboard_dir=hyper_params["tensorboard_dir"],
-                                      tb_run_name=prog_params["tb_name"], timeline_enabled=prog_params["timeline"])
+        model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], hyper_params["batch_size"],
+                              hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
+                              hyper_params["input_dim"], hyper_params["batch_normalization"],
+                              language=hyper_params["language"])
+
+        model.create_training_rnn(hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
+                                  hyper_params["grad_clip"], hyper_params["learning_rate"],
+                                  hyper_params["lr_decay_factor"])
+
+        model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
+        model.initialize(sess)
+        model.restore(sess, hyper_params["checkpoint_dir"])
+
+        for var in tf.global_variables():
+            logging.debug("TF variable : %s - %s", var.name, var)
+
         # Override the learning rate if given on the command line
         if prog_params["learn_rate"] is not None:
-            assign_op = model.learning_rate.assign(prog_params["learn_rate"])
-            sess.run(assign_op, options=run_options, run_metadata=run_metadata)
+            model.set_learning_rate(sess, prog_params["learn_rate"])
 
-        logging.info("Start training...")
-        model.train(sess, audio_processor, test_set, train_set, hyper_params["steps_per_checkpoint"],
-                    hyper_params["checkpoint_dir"], mini_batch_size=hyper_params["mini_batch_size"],
-                    max_steps=prog_params["max_epoch"], run_options=run_options, run_metadata=run_metadata)
+        # Calculate approximate position for learning batch, allow to keep consistency between multiple runs
+        # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
+        full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
+        start_from = model.global_step.eval() * full_run_size
+        if start_from != 0:
+            logging.info("Start training from file number : %d", start_from)
+
+        num_runs = len(train_set) // full_run_size
+        for i in range(num_runs):
+            start_index = start_from + (i * full_run_size)
+            end_index = start_from + ((i+1) * full_run_size)
+            step_num = model.fit(sess, audio_processor, train_set[start_index:end_index],
+                                 hyper_params["mini_batch_size"], max_steps=None,
+                                 run_options=run_options, run_metadata=run_metadata)
+            if step_num % hyper_params["steps_per_checkpoint"] == 0:
+                model.save(sess, hyper_params["checkpoint_dir"])
+                model.evaluate_basic(sess, test_set, audio_processor,
+                                     run_options=run_options, run_metadata=run_metadata)
 
 
 def process_file(audio_processor, hyper_params, file):
@@ -93,8 +119,13 @@ def process_file(audio_processor, hyper_params, file):
 
     with tf.Session() as sess:
         # create model
-        model = create_acoustic_model(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None,
-                                      tb_run_name=None, timeline_enabled=False)
+        model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], 1,
+                              hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
+                              hyper_params["input_dim"], hyper_params["batch_normalization"],
+                              language=hyper_params["language"])
+        model.create_forward_rnn()
+        model.initialize(sess)
+        model.restore(sess, hyper_params["checkpoint_dir"])
 
         (a, b) = feat_vec.shape
         feat_vec = feat_vec.reshape((a, 1, b))
@@ -120,80 +151,19 @@ def evaluate(audio_processor, hyper_params):
 
     with tf.Session() as sess:
         # create model
-        model = create_acoustic_model(sess, hyper_params, hyper_params["batch_size"], forward_only=True,
-                                      tensorboard_dir=None, tb_run_name=None, timeline_enabled=False)
+        model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], hyper_params["batch_size"],
+                              hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
+                              hyper_params["input_dim"], hyper_params["batch_normalization"],
+                              language=hyper_params["language"])
 
-        wer_list = []
-        cer_list = []
-        file_number = 0
-        input_feat_vecs = []
-        input_feat_vec_lengths = []
-        labels = []
-        for file, label, _ in test_set:
-            feat_vec, feat_vec_length = audio_processor.process_audio_file(file)
-            file_number += 1
-            label_data_length = len(label)
-            if (label_data_length > hyper_params["max_target_seq_length"]) or\
-               (feat_vec_length > hyper_params["max_input_seq_length"]):
-                logging.warning("Warning - sample too long : %s (input : %d / text : %s)",
-                                file, feat_vec_length, label_data_length)
-            else:
-                logging.debug("Processed file %d / %d", file_number, len(test_set))
-                input_feat_vecs.append(feat_vec)
-                input_feat_vec_lengths.append(feat_vec_length)
-                labels.append(label)
+        model.create_forward_rnn()
+        model.initialize(sess)
+        model.restore(sess, hyper_params["checkpoint_dir"])
 
-            # If we reached the last file then pad the lists to obtain a full batch
-            if file_number == len(test_set):
-                for i in range(hyper_params["batch_size"] - len(input_feat_vecs)):
-                    input_feat_vecs.append(np.zeros([hyper_params["max_input_seq_length"],
-                                                     audio_processor.feature_size]))
-                    input_feat_vec_lengths.append(0)
-                    labels.append("")
-
-            if len(input_feat_vecs) == hyper_params["batch_size"]:
-                # Run the batch
-                logging.debug("Running a batch")
-                input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-                transcribed_texts = model.process_input(sess, input_feat_vecs, input_feat_vec_lengths)
-                for index, transcribed_text in enumerate(transcribed_texts):
-                    true_label = labels[index]
-                    if len(true_label) > 0:
-                        nb_words = len(true_label.split())
-                        nb_chars = len(true_label.replace(" ", ""))
-                        wer_list.append(model.calculate_wer(transcribed_text, true_label) / float(nb_words))
-                        cer_list.append(model.calculate_cer(transcribed_text, true_label) / float(nb_chars))
-                # Reset the lists
-                input_feat_vecs = []
-                input_feat_vec_lengths = []
-                labels = []
-
-        print("Resulting WER : {0:.3g} %".format((sum(wer_list) * 100) / float(len(wer_list))))
-        print("Resulting CER : {0:.3g} %".format((sum(cer_list) * 100) / float(len(cer_list))))
+        wer, cer = model.evaluate_full(sess, test_set, audio_processor)
+        print("Resulting WER : {0:.3g} %".format(wer))
+        print("Resulting CER : {0:.3g} %".format(cer))
         return
-
-
-def create_acoustic_model(session, hyper_params, batch_size, forward_only=True, tensorboard_dir=None,
-                          tb_run_name=None, timeline_enabled=False):
-    logging.info("Building model... (this takes a while)")
-    model = AcousticModel(session, hyper_params["num_layers"], hyper_params["hidden_size"],
-                          hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
-                          batch_size, hyper_params["learning_rate"], hyper_params["lr_decay_factor"],
-                          hyper_params["grad_clip"], hyper_params["max_input_seq_length"],
-                          hyper_params["max_target_seq_length"], hyper_params["input_dim"],
-                          hyper_params["batch_normalization"], forward_only=forward_only,
-                          tensorboard_dir=tensorboard_dir, tb_run_name=tb_run_name, timeline_enabled=timeline_enabled,
-                          language=hyper_params["language"])
-    ckpt = tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"])
-    # Initialize variables
-    session.run(tf.global_variables_initializer())
-    # Restore from checkpoint (will overwrite variables)
-    if ckpt:
-        logging.info("Reading model parameters from %s", ckpt.model_checkpoint_path)
-        model.saver.restore(session, ckpt.model_checkpoint_path)
-    else:
-        logging.info("Created model with fresh parameters.")
-    return model
 
 
 def record_and_write(audio_processor, hyper_params):
@@ -204,8 +174,15 @@ def record_and_write(audio_processor, hyper_params):
 
     with tf.Session() as sess:
         # create model
-        model = create_acoustic_model(sess, hyper_params, 1, forward_only=True, tensorboard_dir=None,
-                                      tb_run_name=None, timeline_enabled=False)
+        model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], 1,
+                              hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
+                              hyper_params["input_dim"], hyper_params["batch_normalization"],
+                              language=hyper_params["language"])
+
+        model.create_forward_rnn()
+        model.initialize(sess)
+        model.restore(sess, hyper_params["checkpoint_dir"])
+
         # Create stream of listening
         stream = p.open(format=pyaudio.paInt16, channels=1, rate=_SR, input=True, frames_per_buffer=_CHUNK)
         print("NOW RECORDING...")
