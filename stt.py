@@ -94,21 +94,18 @@ def train_rnn(audio_processor, hyper_params, prog_params):
         # Calculate approximate position for learning batch, allow to keep consistency between multiple runs
         # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
         full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
-        start_from = model.global_step.eval() * full_run_size
-        if start_from != 0:
-            logging.info("Start training from file number : %d", start_from)
+        step_num = model.global_step.eval()
+        if step_num != 0:
+            logging.info("Start training from file number : %d", step_num * full_run_size)
 
-        num_runs = len(train_set) // full_run_size
-        for i in range(num_runs):
-            start_index = start_from + (i * full_run_size)
-            end_index = start_from + ((i+1) * full_run_size)
-            step_num = model.fit(sess, audio_processor, train_set[start_index:end_index],
-                                 hyper_params["mini_batch_size"], max_steps=None,
+        while True:
+            step_num = model.fit(sess, audio_processor, train_set[step_num * full_run_size:],
+                                 hyper_params["mini_batch_size"], max_steps=hyper_params["steps_per_checkpoint"],
                                  run_options=run_options, run_metadata=run_metadata)
-            if step_num % hyper_params["steps_per_checkpoint"] == 0:
-                model.save(sess, hyper_params["checkpoint_dir"])
-                model.evaluate_basic(sess, test_set, audio_processor,
-                                     run_options=run_options, run_metadata=run_metadata)
+            model.save(sess, hyper_params["checkpoint_dir"])
+            model.evaluate_basic(sess, test_set, audio_processor, run_options=run_options, run_metadata=run_metadata)
+            if (prog_params["max_epoch"] is not None) and (step_num >= prog_params["max_epoch"]):
+                break
 
 
 def process_file(audio_processor, hyper_params, file):
@@ -123,7 +120,7 @@ def process_file(audio_processor, hyper_params, file):
                               hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
                               hyper_params["input_dim"], hyper_params["batch_normalization"],
                               language=hyper_params["language"])
-        model.create_forward_rnn()
+        model.create_forward_rnn(with_input_queue=False)
         model.initialize(sess)
         model.restore(sess, hyper_params["checkpoint_dir"])
 

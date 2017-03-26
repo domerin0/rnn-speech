@@ -137,7 +137,8 @@ class AcousticModel(object):
             input_seq_lengths = self.input_seq_lengths_ph
 
         # Build the RNN
-        logits, self.prediction, self.rnn_state_zero_op, _, _ = self._build_base_rnn(inputs, input_seq_lengths, True)
+        logits, self.prediction, self.rnn_state_zero_op, _, _, self.saver_op =\
+            self._build_base_rnn(inputs, input_seq_lengths, True)
         return logits
 
     def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor):
@@ -161,7 +162,7 @@ class AcousticModel(object):
 
         inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
 
-        logits, prediction, self.rnn_state_zero_op, self.input_keep_prob_ph, self.output_keep_prob_ph =\
+        logits, prediction, self.rnn_state_zero_op, self.input_keep_prob_ph, self.output_keep_prob_ph, self.saver_op =\
             self._build_base_rnn(inputs, input_seq_lengths, False)
 
         # Object variables used as truth label for training the RNN
@@ -226,6 +227,7 @@ class AcousticModel(object):
                                      (None if forward_only is True)
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
+        :returns saver_op: the tensorflow saving and restore operation
         """
         # Define cells of acoustic model
         with tf.variable_scope('LSTM'):
@@ -302,7 +304,10 @@ class AcousticModel(object):
         # Set the RNN result to the best path found
         prediction = tf.to_int32(decoded[0])
 
-        return logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph
+        # Add the saving and restore operation
+        saver_op = self._add_saving_op()
+
+        return logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph, saver_op
 
     def _add_training_on_rnn(self, logits, grad_clip, learning_rate, lr_decay_factor,
                              sparse_labels, input_seq_lengths, prediction):
@@ -473,7 +478,7 @@ class AcousticModel(object):
         return
 
     @staticmethod
-    def add_saving_op():
+    def _add_saving_op():
         """
         Define a tensorflow operation to save or restore the network
 
@@ -752,8 +757,12 @@ class AcousticModel(object):
         Returns:
           Translated text
         """
-        input_feed = {self.input_keep_prob_ph: 1.0, self.output_keep_prob_ph: 1.0, self.inputs_ph: np.array(inputs),
-                      self.input_seq_lengths_ph: np.array(input_seq_lengths)}
+        input_feed = {self.inputs_ph: np.array(inputs), self.input_seq_lengths_ph: np.array(input_seq_lengths)}
+
+        if (self.input_keep_prob_ph is not None) and (self.output_keep_prob_ph is not None):
+            input_feed[self.input_keep_prob_ph] = 1.0
+            input_feed[self.output_keep_prob_ph] = 1.0
+
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
         predictions = session.run(tf.sparse_tensor_to_dense(outputs[0], default_value=len(self.char_map),
@@ -1023,13 +1032,12 @@ class AcousticModel(object):
                 logging.debug("Max steps reached, exiting.")
                 break
 
-        if not queueing_finished:
-            # Ask the threads to stop.
-            logging.debug("Asking for threads to stop")
-            self.coord.request_stop()
-            # Empty the queue
-            sess.run(self.queue.dequeue_up_to(self.batch_size * 2), options=run_options, run_metadata=run_metadata)
-            # And wait for them to actually stop
-            self.coord.join([thread], stop_grace_period_secs=10)
+        # Ask the threads to stop.
+        logging.debug("Asking for threads to stop")
+        self.coord.request_stop()
+        # Empty the queue
+        sess.run(self.queue.dequeue_up_to(self.batch_size * 2), options=run_options, run_metadata=run_metadata)
+        # And wait for them to actually stop
+        self.coord.join([thread], stop_grace_period_secs=10)
 
         return current_step
