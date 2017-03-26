@@ -36,12 +36,12 @@ def main():
 def train_rnn(audio_processor, hyper_params, prog_params):
     # Load the train set data
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"], audio_processor,
+                                                 file_cache=hyper_params["training_filelist_cache"],
                                                  size_ordering=hyper_params["dataset_size_ordering"])
     train_set = data_processor.run()
     if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
-        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor,
-                                                     size_ordering=hyper_params["dataset_size_ordering"])
+        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor)
         test_set = data_processor.run()
     elif hyper_params["train_frac"] is not None:
         # Or use a fraction of the train set for the test set
@@ -187,7 +187,7 @@ def record_and_write(audio_processor, hyper_params):
         while True:
             data = stream.read(_CHUNK)
             data = np.fromstring(data)
-            feat_vec, original_feat_vec_length = audio_processor.extract_mfcc(data, _SR)
+            feat_vec, original_feat_vec_length = audio_processor.extraction_f(data, _SR)
             (a, b) = feat_vec.shape
             feat_vec = feat_vec.reshape((a, 1, b))
             result = model.process_input(sess, feat_vec, [original_feat_vec_length])

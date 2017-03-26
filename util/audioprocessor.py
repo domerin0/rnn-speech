@@ -7,33 +7,52 @@ import logging
 
 class AudioProcessor(object):
     def __init__(self, max_input_seq_length, feature_type="mfcc"):
-        '''
+        """
         feature_type - string options are: mfcc, fbank
         mfcc is a 20-dim input 
         fbank is 120-dim input (mel filterbank with delta and double delta)
-        '''
+        """
         self.max_input_seq_length = max_input_seq_length
-        if feature_type == "mfcc":
-            self.extraction_f = self.extract_mfcc
+        self.frame_size = 0.025
+        self.frame_stride = 0.01
+        self.feature_type = feature_type
+        if self.feature_type == "mfcc":
+            self.extraction_f = self._extract_mfcc
             self.feature_size = 20
-        elif feature_type == "fbank":
-            self.extraction_f = self.extract_fbank
+        elif self.feature_type == "fbank":
+            self.extraction_f = self._extract_fbank
             self.feature_size = 120
         else:
             raise ValueError("{0} is not a valid extraction function, \
-            only fbank and mfcc are accepted.".format(feature_type))
+            only fbank and mfcc are accepted.".format(self.feature_type))
+
+    def get_audio_file_length(self, file_name):
+        """
+        Evaluate the mfcc_length for a given file
+        Note : returned value is an estimation, librosa will pad so the real size can be bigger (+1 to +3)
+        
+        :param file_name: an audio file path
+        :return: int, estimated mfcc_length
+        """
+        duration = librosa.core.get_duration(filename=file_name)
+        length = int(duration // self.frame_stride) - 1
+        return length
 
     def process_audio_file(self, file_name):
         """
         Reads in audio file, processes it
-        Returns padded feature tensor and original length
+        
+        :param file_name: an audio file path
+        :returns: mfcc: padded feature tensor
+        :returns: mfcc_length: original length of the mfcc before padding
         """
         sig, sr = librosa.load(file_name, mono=True)
         return self.extraction_f(sig, sr)
 
-    def extract_mfcc(self, sig, sr):
+    def _extract_mfcc(self, sig, sr):
         # mfcc
-        mfcc = librosa.feature.mfcc(sig, sr)
+        mfcc = librosa.feature.mfcc(sig, sr, hop_length=int(round(sr * self.frame_stride)),
+                                    n_fft=int(round(sr * self.frame_size)))
         # mfcc is of shape (20 mfcc, time_serie)
         transposed_mfcc = mfcc.transpose()
         mfcc_length = len(transposed_mfcc)
@@ -50,19 +69,18 @@ class AudioProcessor(object):
         assert len(transposed_mfcc) == self.max_input_seq_length, "Padding incorrect..."
         return transposed_mfcc, mfcc_length
 
-    def extract_fbank(self, sig, sr):
-        '''
+    def _extract_fbank(self, sig, sr):
+        """
         Compute log mel filterbank features with deltas and double deltas
 
         This is based on:
         http://haythamfayek.com/2016/04/21/speech-processing-for-machine-learning.html
 
         TODO energy is not yet obtained.
-        '''
+        """
 
         emphasized_signal = np.append(sig[0], sig[1:] - 0.97 * sig[:-1])
-        #frame size = 0.025, frame stride = 0.01
-        frame_length, frame_step = 0.025 * sr, 0.01 * sr
+        frame_length, frame_step = self.frame_size * sr, self.frame_stride * sr
         signal_length = len(emphasized_signal)
         frame_length = int(round(frame_length))
         frame_step = int(round(frame_step))
@@ -73,14 +91,14 @@ class AudioProcessor(object):
         pad_signal = np.append(emphasized_signal, z)
 
         indices = np.tile(np.arange(0, frame_length),
-                             (num_frames, 1)) + np.tile(np.arange(0, num_frames * frame_step, frame_step),
-                             (frame_length, 1)).T
+                          (num_frames, 1)) + np.tile(np.arange(0, num_frames * frame_step, frame_step),
+                                                     (frame_length, 1)).T
         frames = pad_signal[indices.astype(np.int32, copy=False)]
-        #apply the hamming window function
+        # Apply the hamming window function
         frames *= np.hamming(frame_length)
         nfft, nfilt = 512, 40
         mag_frames = np.absolute(np.fft.rfft(frames, nfft))
-        pow_frames = ((1.0 / nfft) * ((mag_frames) ** 2))
+        pow_frames = ((1.0 / nfft) * (mag_frames ** 2))
         low_freq_mel = 0
         high_freq_mel = (2595 * np.log10(1 + (sr / 2) / 700))
         mel_points = np.linspace(low_freq_mel, high_freq_mel, nfilt + 2)
@@ -100,7 +118,7 @@ class AudioProcessor(object):
         filter_banks = np.dot(pow_frames, fbank.T)
         filter_banks = np.where(filter_banks == 0, np.finfo(float).eps, filter_banks)
         filter_banks = 20 * np.log10(filter_banks)
-        #apply mean normalization
+        # Apply mean normalization
         filter_banks -= (np.mean(filter_banks, axis=0) + 1e-8)
         filter_banks = filter_banks.transpose()
         delta = librosa.feature.delta(filter_banks)
@@ -116,7 +134,7 @@ class AudioProcessor(object):
             fbank_feat = fbank_feat[:self.max_input_seq_length]
         elif fbank_length < self.max_input_seq_length:
             pad_length = self.max_input_seq_length - fbank_length
-            #For now length is 120 (feature vector excluding energies)
+            # For now length is 120 (feature vector excluding energies)
             padding = np.zeros((pad_length, 120), dtype=np.float)
             fbank_feat = np.concatenate((fbank_feat, padding), 0)
         assert len(fbank_feat) == self.max_input_seq_length, "Padding incorrect..."

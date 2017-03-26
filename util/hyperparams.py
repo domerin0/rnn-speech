@@ -118,6 +118,7 @@ class HyperParameterHandler(object):
         dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
         dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
         dic["training_dataset_dirs"] = config.get(training_section, "training_dataset_dirs")
+        dic["training_filelist_cache"] = config.get(training_section, "training_filelist_cache", fallback=None)
         dic["test_dataset_dirs"] = config.get(training_section, "test_dataset_dirs", fallback=None)
         dic["train_frac"] = config.getfloat(training_section, "train_frac", fallback=None)
         dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
