@@ -99,9 +99,9 @@ def train_rnn(audio_processor, hyper_params, prog_params):
             logging.info("Start training from file number : %d", step_num * full_run_size)
 
         while True:
-            step_num = model.fit(sess, audio_processor, train_set[step_num * full_run_size:],
-                                 hyper_params["mini_batch_size"], max_steps=hyper_params["steps_per_checkpoint"],
-                                 run_options=run_options, run_metadata=run_metadata)
+            step_num, _ = model.fit(sess, audio_processor, train_set[step_num * full_run_size:],
+                                    hyper_params["mini_batch_size"], max_steps=hyper_params["steps_per_checkpoint"],
+                                    run_options=run_options, run_metadata=run_metadata)
             model.save(sess, hyper_params["checkpoint_dir"])
             model.evaluate_basic(sess, test_set, audio_processor, run_options=run_options, run_metadata=run_metadata)
             if (prog_params["max_epoch"] is not None) and (step_num >= prog_params["max_epoch"]):

@@ -91,6 +91,7 @@ class AcousticModel(object):
         # Create object's variables for training
         self.input_keep_prob = self.output_keep_prob = None
         self.queue = None
+        self.queue_capacity = None
         self.queue_input_ph = self.queue_input_length_ph = self.queue_label_ph = None
         self.enqueue_op = None
         self.global_step = None
@@ -179,9 +180,9 @@ class AcousticModel(object):
 
     def _create_input_queue(self):
         # Create the input queue
-        capacity = self.batch_size * 2
+        self.queue_capacity = self.batch_size * 2
         with tf.container("PaddingFIFOQueue"):
-            self.queue = tf.PaddingFIFOQueue(capacity, [tf.float32, tf.int32, tf.int32, tf.bool],
+            self.queue = tf.PaddingFIFOQueue(self.queue_capacity, [tf.float32, tf.int32, tf.int32, tf.bool],
                                              [[None, self.input_dim], [], [None], [1]])
 
         # Define the enqueue and dequeue operations
@@ -846,6 +847,9 @@ class AcousticModel(object):
         logging.info("Evaluation at step %d : loss %.5f - error_rate %.5f - duration %.2f",
                      current_step, mean_loss, mean_error_rate, time.time() - start_time)
 
+        # Empty the queue
+        self.empty_queue(sess)
+
         return mean_loss, mean_error_rate, current_step
 
     def enqueue_data(self, sess, audio_processor, dataset, run_forever=False, run_options=None, run_metadata=None):
@@ -930,6 +934,17 @@ class AcousticModel(object):
                 logging.debug("Queue has been closed, exiting input thread")
                 break
 
+    def empty_queue(self, sess):
+        run_options = tf.RunOptions()
+        run_options.timeout_in_ms = 1000
+
+        try:
+            sess.run(self.queue.dequeue_up_to(self.queue_capacity * 2), options=run_options)
+        except tf.errors.InvalidArgumentError:
+            pass
+        except tf.errors.DeadlineExceededError:
+            pass
+
     def _write_timeline(self, run_metadata, inter_time, action=""):
         logging.debug("--- Action %s duration : %.4f", action, time.time() - inter_time)
 
@@ -1010,7 +1025,8 @@ class AcousticModel(object):
         :param max_steps: max number of steps to run
         :param run_options: options parameter for the sess.run calls
         :param run_metadata: run_metadata parameter for the sess.run calls
-        :return: step number at the end of the training
+        :return total_steps: total training steps done by the model
+        :return local_steps: total training steps done during this fit session
         """
         # Create a thread to load data
         thread = self.enqueue_data(sess, audio_processor, train_set, run_forever=False,
@@ -1019,15 +1035,16 @@ class AcousticModel(object):
         # Main training loop
         logging.info("Start fit with %d files", len(train_set))
         queueing_finished = False
-        current_step = 0
+        total_steps = local_steps = 0
         while not queueing_finished:
             if self.coord.should_stop():
                 break
 
-            _, _, current_step, queueing_finished = self.run_train_step(sess, mini_batch_size, run_options=run_options,
-                                                                        run_metadata=run_metadata)
+            _, _, total_steps, queueing_finished = self.run_train_step(sess, mini_batch_size, run_options=run_options,
+                                                                       run_metadata=run_metadata)
+            local_steps += 1
 
-            if (max_steps is not None) and (current_step >= max_steps):
+            if (max_steps is not None) and (local_steps >= max_steps):
                 # Maximum allowed reached, exiting the training process
                 logging.debug("Max steps reached, exiting.")
                 break
@@ -1036,8 +1053,8 @@ class AcousticModel(object):
         logging.debug("Asking for threads to stop")
         self.coord.request_stop()
         # Empty the queue
-        sess.run(self.queue.dequeue_up_to(self.batch_size * 2), options=run_options, run_metadata=run_metadata)
+        self.empty_queue(sess)
         # And wait for them to actually stop
         self.coord.join([thread], stop_grace_period_secs=10)
 
-        return current_step
+        return total_steps, local_steps
