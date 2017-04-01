@@ -138,8 +138,11 @@ class AcousticModel(object):
             input_seq_lengths = self.input_seq_lengths_ph
 
         # Build the RNN
-        logits, self.prediction, self.rnn_state_zero_op, _, _, self.saver_op =\
-            self._build_base_rnn(inputs, input_seq_lengths, True)
+        logits, self.prediction, self.rnn_state_zero_op, _, _ = self._build_base_rnn(inputs, input_seq_lengths, True)
+
+        # Add the saving and restore operation
+        self.saver_op = self._add_saving_op()
+
         return logits
 
     def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor):
@@ -163,7 +166,7 @@ class AcousticModel(object):
 
         inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
 
-        logits, prediction, self.rnn_state_zero_op, self.input_keep_prob_ph, self.output_keep_prob_ph, self.saver_op =\
+        logits, prediction, self.rnn_state_zero_op, self.input_keep_prob_ph, self.output_keep_prob_ph =\
             self._build_base_rnn(inputs, input_seq_lengths, False)
 
         # Object variables used as truth label for training the RNN
@@ -177,6 +180,9 @@ class AcousticModel(object):
         # Add the train part to the network
         self.learning_rate_var = self._add_training_on_rnn(logits, grad_clip, learning_rate, lr_decay_factor,
                                                            sparse_labels, input_seq_lengths, prediction)
+
+        # Add the saving and restore operation
+        self.saver_op = self._add_saving_op()
 
     def _create_input_queue(self):
         # Create the input queue
@@ -228,7 +234,6 @@ class AcousticModel(object):
                                      (None if forward_only is True)
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
-        :returns saver_op: the tensorflow saving and restore operation
         """
         # Define cells of acoustic model
         with tf.variable_scope('LSTM'):
@@ -305,10 +310,7 @@ class AcousticModel(object):
         # Set the RNN result to the best path found
         prediction = tf.to_int32(decoded[0])
 
-        # Add the saving and restore operation
-        saver_op = self._add_saving_op()
-
-        return logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph, saver_op
+        return logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph
 
     def _add_training_on_rnn(self, logits, grad_clip, learning_rate, lr_decay_factor,
                              sparse_labels, input_seq_lengths, prediction):
@@ -472,8 +474,9 @@ class AcousticModel(object):
 
         # Restore from checkpoint (will overwrite variables)
         if ckpt:
-            logging.info("Reading model parameters from %s", ckpt.model_checkpoint_path)
             self.saver_op.restore(session, ckpt.model_checkpoint_path)
+            logging.info("Restored model parameters from %s (global_step id %d)", ckpt.model_checkpoint_path,
+                         self.global_step.eval())
         else:
             logging.info("Created model with fresh parameters.")
         return
@@ -490,9 +493,13 @@ class AcousticModel(object):
         # Only save needed tensors :
         #   - weight and biais from the input layer, the output layer and the LSTM
         #   - currents global_step and learning_rate
+
+        for var in tf.global_variables():
+            logging.debug("TF variable : %s - %s", var.name, var)
+
         save_list = [var for var in tf.global_variables()
                      if (var.name.find('/input_w:0') != -1) or (var.name.find('/input_b:0') != -1) or
-                        (var.name.find('/output_w:0') != -1) or (var.name.find('/output_w:0') != -1) or
+                        (var.name.find('/output_w:0') != -1) or (var.name.find('/output_b:0') != -1) or
                         (var.name.find('global_step:0') != -1) or (var.name.find('learning_rate:0') != -1) or
                         (var.name.find('/weights:0') != -1) or (var.name.find('/biases:0') != -1)]
         if len(save_list) == 0:
@@ -688,7 +695,7 @@ class AcousticModel(object):
 
         return d[len(r)][len(h)]
 
-    def train_step(self, session, compute_gradients=True, run_options=None, run_metadata=None):
+    def run_step(self, session, compute_gradients=True, run_options=None, run_metadata=None):
         """
         Returns:
         mean of ctc_loss
@@ -708,7 +715,7 @@ class AcousticModel(object):
 
         # Actually run the tensorflow session
         start_time = time.time()
-        logging.debug("Starting a train step")
+        logging.debug("Starting a step")
         outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
         mini_batch_num = outputs[0]
         logging.debug("Step duration : %.2f", time.time() - start_time)
@@ -728,7 +735,7 @@ class AcousticModel(object):
         # Get each accumulator's value and compute the mean for the batch
         output_feed = [self.accumulated_mean_loss, self.accumulated_error_rate, self.mini_batch, self.global_step]
 
-        # Append the train_step if needed (it will apply the gradients)
+        # Append the train_step_op if needed (it will apply the gradients)
         if is_training:
             output_feed.append(self.train_step_op)
 
@@ -837,7 +844,7 @@ class AcousticModel(object):
 
         try:
             while True:
-                self.train_step(sess, False, run_options=run_options, run_metadata=run_metadata)
+                self.run_step(sess, False, run_options=run_options, run_metadata=run_metadata)
         except tf.errors.InvalidArgumentError:
             logging.debug("Queue empty, exiting evaluation step")
 
@@ -987,7 +994,7 @@ class AcousticModel(object):
         try:
             for i in range(mini_batch_size):
                 # Run a step on a batch and keep the loss
-                mini_batch_num = self.train_step(sess, True, run_options=run_options, run_metadata=run_metadata)
+                mini_batch_num = self.run_step(sess, True, run_options=run_options, run_metadata=run_metadata)
                 if self.timeline_enabled:
                     inter_time = self._write_timeline(run_metadata, inter_time, "step-" + str(i))
         except tf.errors.InvalidArgumentError:
