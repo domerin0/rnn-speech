@@ -14,33 +14,43 @@ except ImportError:
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_paths, audio_processor, file_cache=None, size_ordering=False):
+    def __init__(self, raw_data_paths, audio_processor, file_cache=None, size_ordering=False,
+                 min_text_size=3, min_audio_size=40):
         self.raw_data_paths = raw_data_paths.replace(" ", "").split(',')
         self.audio_processor = audio_processor
         self.size_ordering = size_ordering
         self.file_cache = file_cache
+        self.min_text_size = min_text_size
+        self.min_audio_size = min_audio_size
 
     def run(self):
-        # Load the file list if a cache file is provided
-        if self.file_cache is not None:
-            data = self.load_filelist()
-            if data is not None:
-                logging.info("Using audio files list from cache file.")
-                return data
+        # Load the file list
+        data = self.load_filelist()
+        if data is not None:
+            logging.info("Using audio files list from cache file.")
+        else:
+            data = []
+            for path in self.raw_data_paths:
+                data_type = self.get_type(path)
+                if data_type == "Shtooka":
+                    data += self.get_data_shtooka(path)
+                elif data_type == "Vystadial_2013":
+                    data += self.get_data_vystadial_2013(path)
+                elif data_type == "TEDLIUM":
+                    data += self.get_data_tedlium(path)
+                elif data_type == "LibriSpeech":
+                    data += self.get_data_librispeech(path)
+                else:
+                    raise Exception("ERROR : unknown training_dataset_type")
 
-        data = []
-        for path in self.raw_data_paths:
-            data_type = self.get_type(path)
-            if data_type == "Shtooka":
-                data += self.get_data_shtooka(path)
-            elif data_type == "Vystadial_2013":
-                data += self.get_data_vystadial_2013(path)
-            elif data_type == "TEDLIUM":
-                data += self.get_data_tedlium(path)
-            elif data_type == "LibriSpeech":
-                data += self.get_data_librispeech(path)
-            else:
-                raise Exception("ERROR : unknown training_dataset_type")
+            # Adding length
+            if self.size_ordering is True:
+                data = self.add_audio_file_length(data)
+
+            # Save the file list if a cache file is provided
+            if self.file_cache is not None:
+                logging.info("Saving audio files list to cache file.")
+                self.save_filelist(data)
 
         # Check that there is data
         if len(data) == 0:
@@ -48,17 +58,16 @@ class DataProcessor(object):
 
         # Order by size ascending if needed
         if self.size_ordering is True:
-            data = self.add_audio_file_length(data)
             logging.debug("Sorting the audio files list by duration")
             data = sorted(data, key=lambda data: data[2])
         else:
             logging.debug("Shuffling the audio files list")
             shuffle(data)
 
-        # Save the file list if a cache file is provided
-        if self.file_cache is not None:
-            logging.info("Saving audio files list to cache file.")
-            self.save_filelist(data)
+        # Filtering small text items
+        data = [item for item in data if len(item[1]) > self.min_text_size]
+        # Filtering small files if we have the size
+        data = [item for item in data if (item[2] is None) or (item[2] > self.min_audio_size)]
 
         return data
 
@@ -134,7 +143,7 @@ class DataProcessor(object):
             pickle.dump([self.raw_data_paths, data], handle)
 
     def load_filelist(self):
-        if os.path.exists(self.file_cache):
+        if (self.file_cache is not None) and (os.path.exists(self.file_cache)):
             with open(self.file_cache, 'rb') as handle:
                 [data_path, data] = pickle.load(handle)
             if data_path == self.raw_data_paths:
