@@ -162,8 +162,11 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
     full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
 
     while True:
-        local_input_seq_length = train_set[step_num * full_run_size][2] + 10
-        local_audio_processor = audioprocessor.AudioProcessor(local_input_seq_length, hyper_params["signal_processing"])
+        # Select training data
+        start_pos = step_num * full_run_size
+        end_pos = start_pos + (full_run_size * hyper_params["steps_per_checkpoint"])
+        # Find max_input_seq_length for this training data
+        local_input_seq_length = train_set[end_pos][2] + 10
         if local_input_seq_length > hyper_params["max_input_seq_length"]:
             logging.warning("Reach max_input_seq_length, exiting.")
             return
@@ -174,9 +177,10 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
             model = build_training_rnn(sess, hyper_params, prog_params,
                                        overriden_max_input_seq_length=local_input_seq_length)
 
+            # Create a local audio_processor set for the local max_input_seq_length
+            local_audio_processor = audioprocessor.AudioProcessor(local_input_seq_length,
+                                                                  hyper_params["signal_processing"])
             # Run training
-            start_pos = step_num * full_run_size
-            end_pos = start_pos + (full_run_size * hyper_params["steps_per_checkpoint"])
             step_num, _ = model.fit(sess, local_audio_processor, train_set[start_pos:end_pos],
                                     hyper_params["mini_batch_size"], run_options=run_options, run_metadata=run_metadata)
             model.save(sess, hyper_params["checkpoint_dir"])
