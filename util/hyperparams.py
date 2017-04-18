@@ -116,6 +116,7 @@ class HyperParameterHandler(object):
         dic["use_config_file_if_checkpoint_exists"] = config.getboolean(general_section,
                                                                         "use_config_file_if_checkpoint_exists")
         dic["steps_per_checkpoint"] = config.getint(general_section, "steps_per_checkpoint")
+        dic["steps_per_evaluation"] = config.getint(general_section, "steps_per_evaluation")
         dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
         dic["training_dataset_dirs"] = config.get(training_section, "training_dataset_dirs")
         dic["training_filelist_cache"] = config.get(training_section, "training_filelist_cache", fallback=None)

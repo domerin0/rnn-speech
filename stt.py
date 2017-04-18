@@ -163,8 +163,8 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
 
     while True:
         # Select training data
-        start_pos = step_num * full_run_size
-        end_pos = start_pos + (full_run_size * hyper_params["steps_per_checkpoint"])
+        start_pos = (step_num * full_run_size) % len(train_set)
+        end_pos = min(start_pos + (full_run_size * hyper_params["steps_per_checkpoint"]), len(train_set))
         # Find max_input_seq_length for this training data
         local_input_seq_length = train_set[end_pos][2] + 10
         if local_input_seq_length > hyper_params["max_input_seq_length"]:
@@ -188,14 +188,16 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
         tf.reset_default_graph()
 
         # Run an evaluation session
-        with tf.Session(config=config) as sess:
-            # create model
-            model = build_training_rnn(sess, hyper_params, prog_params)
+        if step_num % hyper_params["steps_per_evaluation"] == 0:
+            with tf.Session(config=config) as sess:
+                # create model
+                model = build_training_rnn(sess, hyper_params, prog_params)
 
-            # Evaluate
-            model.evaluate_basic(sess, test_set, audio_processor, run_options=run_options, run_metadata=run_metadata)
+                # Evaluate
+                model.evaluate_basic(sess, test_set, audio_processor, run_options=run_options,
+                                     run_metadata=run_metadata)
 
-        tf.reset_default_graph()
+            tf.reset_default_graph()
 
         if (prog_params["max_epoch"] is not None) and (step_num >= prog_params["max_epoch"]):
             break
@@ -229,8 +231,7 @@ def evaluate(audio_processor, hyper_params):
         return
 
     # Load the test set data
-    data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor,
-                                                 size_ordering=hyper_params["dataset_size_ordering"])
+    data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor)
     test_set = data_processor.run()
 
     logging.info("Using %d size of test set", len(test_set))

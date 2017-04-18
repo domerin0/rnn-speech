@@ -138,7 +138,8 @@ class AcousticModel(object):
             input_seq_lengths = self.input_seq_lengths_ph
 
         # Build the RNN
-        logits, self.prediction, self.rnn_state_zero_op, _, _ = self._build_base_rnn(inputs, input_seq_lengths, True)
+        self.global_step, logits, self.prediction, self.rnn_state_zero_op, _, _ = \
+            self._build_base_rnn(inputs, input_seq_lengths, True)
 
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
@@ -166,8 +167,8 @@ class AcousticModel(object):
 
         inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
 
-        logits, prediction, self.rnn_state_zero_op, self.input_keep_prob_ph, self.output_keep_prob_ph =\
-            self._build_base_rnn(inputs, input_seq_lengths, False)
+        self.global_step, logits, prediction, self.rnn_state_zero_op,\
+            self.input_keep_prob_ph, self.output_keep_prob_ph = self._build_base_rnn(inputs, input_seq_lengths, False)
 
         # Object variables used as truth label for training the RNN
         # Label tensor must be provided as a sparse tensor.
@@ -235,6 +236,9 @@ class AcousticModel(object):
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
         """
+        # Define a variable to keep track of the learning process step
+        global_step = tf.Variable(0, trainable=False, name='global_step')
+
         # Define cells of acoustic model
         with tf.variable_scope('LSTM'):
             cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True)
@@ -310,7 +314,7 @@ class AcousticModel(object):
         # Set the RNN result to the best path found
         prediction = tf.to_int32(decoded[0])
 
-        return logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph
+        return global_step, logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph
 
     def _add_training_on_rnn(self, logits, grad_clip, learning_rate, lr_decay_factor,
                              sparse_labels, input_seq_lengths, prediction):
@@ -343,9 +347,6 @@ class AcousticModel(object):
         -------
         :returns: tensorflow variable keeping the current learning rate
         """
-        # Define a variable to keep track of the learning process step
-        self.global_step = tf.Variable(0, trainable=False, name='global_step')
-
         # Define the variable for the learning rate
         learning_rate_var = tf.Variable(float(learning_rate), trainable=False, name='learning_rate')
         # Define an op to decrease the learning rate
