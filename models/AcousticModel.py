@@ -239,6 +239,14 @@ class AcousticModel(object):
         # Define a variable to keep track of the learning process step
         global_step = tf.Variable(0, trainable=False, name='global_step')
 
+        # If building the RNN for training then create dropout rate placeholders
+        input_keep_prob_ph = output_keep_prob_ph = None
+        if not forward_only:
+            with tf.name_scope('dropout'):
+                # Create placeholders, used to override values when running on the test set
+                input_keep_prob_ph = tf.placeholder(tf.float32)
+                output_keep_prob_ph = tf.placeholder(tf.float32)
+
         # Define cells of acoustic model
         with tf.variable_scope('LSTM'):
             # Create each layer
@@ -247,12 +255,8 @@ class AcousticModel(object):
                 cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True)
 
                 # If building the RNN for training then add a dropoutWrapper to the cells
-                input_keep_prob_ph = output_keep_prob_ph = None
                 if not forward_only:
                     with tf.name_scope('dropout'):
-                        # Create placeholders, used to override values when running on the test set
-                        input_keep_prob_ph = tf.placeholder(tf.float32)
-                        output_keep_prob_ph = tf.placeholder(tf.float32)
                         cell = tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=input_keep_prob_ph,
                                                              output_keep_prob=output_keep_prob_ph)
                 layers_list.append(cell)
