@@ -241,21 +241,24 @@ class AcousticModel(object):
 
         # Define cells of acoustic model
         with tf.variable_scope('LSTM'):
-            cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True)
+            # Create each layer
+            layers_list = []
+            for _ in range(self.num_layers):
+                cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True)
 
-            # If building the RNN for training then add a dropoutWrapper to the cells
-            input_keep_prob_ph = output_keep_prob_ph = None
-            if not forward_only:
-                with tf.name_scope('dropout'):
-                    # Create placeholders, used to override values when running on the test set
-                    input_keep_prob_ph = tf.placeholder(tf.float32)
-                    output_keep_prob_ph = tf.placeholder(tf.float32)
-                    cell = tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=input_keep_prob_ph,
-                                                         output_keep_prob=output_keep_prob_ph)
+                # If building the RNN for training then add a dropoutWrapper to the cells
+                input_keep_prob_ph = output_keep_prob_ph = None
+                if not forward_only:
+                    with tf.name_scope('dropout'):
+                        # Create placeholders, used to override values when running on the test set
+                        input_keep_prob_ph = tf.placeholder(tf.float32)
+                        output_keep_prob_ph = tf.placeholder(tf.float32)
+                        cell = tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=input_keep_prob_ph,
+                                                             output_keep_prob=output_keep_prob_ph)
+                layers_list.append(cell)
 
-            # Add more layers if needed
-            if self.num_layers >= 1:
-                cell = tf.contrib.rnn.MultiRNNCell([cell] * self.num_layers, state_is_tuple=True)
+            # Store the layers in a multi-layer RNN
+            cell = tf.contrib.rnn.MultiRNNCell(layers_list, state_is_tuple=True)
 
         # Build the input layer between input and the RNN
         with tf.variable_scope('Input_Layer'):
