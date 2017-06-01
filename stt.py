@@ -24,10 +24,7 @@ def main():
     hyper_params["input_dim"] = audio_processor.feature_size
 
     if prog_params['train'] is True:
-        if hyper_params["dataset_size_ordering"]:
-            train_rnn_size_ordered(audio_processor, hyper_params, prog_params)
-        else:
-            train_rnn(audio_processor, hyper_params, prog_params)
+        train_rnn(audio_processor, hyper_params, prog_params, size_ordering=hyper_params["dataset_size_ordering"])
     elif prog_params['file'] is not None:
         process_file(audio_processor, hyper_params, prog_params['file'])
     elif prog_params['record'] is True:
@@ -54,71 +51,11 @@ def build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_
     return model
 
 
-def train_rnn(audio_processor, hyper_params, prog_params):
+def train_rnn(audio_processor, hyper_params, prog_params, size_ordering=True):
     # Load the train set data
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"], audio_processor,
                                                  file_cache=hyper_params["training_filelist_cache"],
-                                                 size_ordering=hyper_params["dataset_size_ordering"])
-    train_set = data_processor.run()
-    if hyper_params["test_dataset_dirs"] is not None:
-        # Load the test set data
-        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor)
-        test_set = data_processor.run()
-    elif hyper_params["train_frac"] is not None:
-        # Or use a fraction of the train set for the test set
-        num_train = max(1, int(floor(hyper_params["train_frac"] * len(train_set))))
-        test_set = train_set[num_train:]
-        train_set = train_set[:num_train]
-    else:
-        # Or use no test set
-        test_set = []
-
-    logging.info("Using %d files in train set", len(train_set))
-    logging.info("Using %d size of test set", len(test_set))
-
-    config = tf.ConfigProto()
-    jit_level = 0
-    if prog_params["XLA"]:
-        # Turns on XLA JIT compilation.
-        jit_level = tf.OptimizerOptions.ON_1
-    config.graph_options.optimizer_options.global_jit_level = jit_level
-    run_metadata = tf.RunMetadata()
-
-    # Add timeline data generation options if needed
-    if prog_params["timeline"] is True:
-        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-    else:
-        run_options = None
-
-    with tf.Session(config=config) as sess:
-        # create model
-        model = build_training_rnn(sess, hyper_params, prog_params)
-
-        # Override the learning rate if given on the command line
-        if prog_params["learn_rate"] is not None:
-            model.set_learning_rate(sess, prog_params["learn_rate"])
-
-        # Calculate approximate position for learning batch, allow to keep consistency between multiple runs
-        # of the same training job (will default to 0 if it is the first launch because global_step will be 0)
-        full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
-        step_num = model.global_step.eval()
-        if step_num != 0:
-            logging.info("Start training from file number : %d", step_num * full_run_size)
-
-        while True:
-            step_num, _ = model.fit(sess, audio_processor, train_set[step_num * full_run_size:],
-                                    hyper_params["mini_batch_size"], max_steps=hyper_params["steps_per_checkpoint"],
-                                    run_options=run_options, run_metadata=run_metadata)
-            model.save(sess, hyper_params["checkpoint_dir"])
-            model.evaluate_basic(sess, test_set, audio_processor, run_options=run_options, run_metadata=run_metadata)
-            if (prog_params["max_epoch"] is not None) and (step_num >= prog_params["max_epoch"]):
-                break
-
-
-def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
-    # Load the train set data
-    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"], audio_processor,
-                                                 file_cache=hyper_params["training_filelist_cache"], size_ordering=True)
+                                                 size_ordering=size_ordering)
     train_set = data_processor.run()
     if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
@@ -161,15 +98,21 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
 
     full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
 
+    previous_mean_error_rate = None
     while True:
         # Select training data
         start_pos = (step_num * full_run_size) % len(train_set)
-        end_pos = min(start_pos + (full_run_size * hyper_params["steps_per_checkpoint"]), len(train_set))
+        end_pos = (start_pos + (full_run_size * hyper_params["steps_per_checkpoint"])) % len(train_set)
+        if end_pos > start_pos:
+            session_set = train_set[start_pos:end_pos]
+        else:
+            session_set = train_set[start_pos:]
+            session_set += train_set[:end_pos]
+
         # Find max_input_seq_length for this training data
-        local_input_seq_length = train_set[end_pos][2] + 10
-        if local_input_seq_length > hyper_params["max_input_seq_length"]:
-            logging.warning("Reach max_input_seq_length, exiting.")
-            return
+        local_input_seq_length = max(session_set, key=lambda x: x[2])[2] + 10
+        local_input_seq_length = min(local_input_seq_length, hyper_params["max_input_seq_length"])
+        logging.info("Start a session with local_input_seq_length = %d", local_input_seq_length)
 
         # Run a training session
         with tf.Session(config=config) as sess:
@@ -181,7 +124,7 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
             local_audio_processor = audioprocessor.AudioProcessor(local_input_seq_length,
                                                                   hyper_params["signal_processing"])
             # Run training
-            step_num, _ = model.fit(sess, local_audio_processor, train_set[start_pos:end_pos],
+            step_num, _ = model.fit(sess, local_audio_processor, session_set,
                                     hyper_params["mini_batch_size"], run_options=run_options, run_metadata=run_metadata)
             model.save(sess, hyper_params["checkpoint_dir"])
 
@@ -194,8 +137,14 @@ def train_rnn_size_ordered(audio_processor, hyper_params, prog_params):
                 model = build_training_rnn(sess, hyper_params, prog_params)
 
                 # Evaluate
-                model.evaluate_basic(sess, test_set, audio_processor, run_options=run_options,
-                                     run_metadata=run_metadata)
+                mean_loss, mean_error_rate, _ = model.evaluate_basic(sess, test_set, audio_processor,
+                                                                     run_options=run_options, run_metadata=run_metadata)
+
+                # Decay the learning rate if the model is not improving
+                if previous_mean_error_rate is not None:
+                    if mean_error_rate > previous_mean_error_rate:
+                        sess.run(model.learning_rate_decay_op)
+                    previous_mean_error_rate = mean_error_rate
 
             tf.reset_default_graph()
 
