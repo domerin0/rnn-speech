@@ -145,6 +145,9 @@ def train_rnn(audio_processor, hyper_params, prog_params, size_ordering=True):
                     if mean_error_rate > previous_mean_error_rate:
                         sess.run(model.learning_rate_decay_op)
                         logging.info("Model is not improving, decaying the learning rate")
+                        if model.learning_rate_var.eval() < 1e-7:
+                            logging.info("Learning rate is too low, exiting")
+                            break
                         model.save(sess, hyper_params["checkpoint_dir"])
                         logging.info("Overwriting the checkpoint file with the new learning rate")
                 previous_mean_error_rate = mean_error_rate
