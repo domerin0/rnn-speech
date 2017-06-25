@@ -16,8 +16,8 @@ One pre-trained example is available [here](trained_models/acoustic_model/englis
 on any file (your own recorded voice for example).
 
 Results on LibriSpeech's test-clean evaluation set for the pre-trained model is :
-* __CER : 19,5 %__
-* __WER : 52 %__
+* __CER : 15,2 %__
+* __WER : 42,4 %__
 
 It lacks the character-level language model which is still in the works.
 

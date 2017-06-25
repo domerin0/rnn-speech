@@ -1,13 +1,13 @@
 # English pre-trained model
 
-This directory contain a trained english acoustic model : 9.400 steps of 30 files batches 
-(10 mini-batchs of 3 files for each step).
+This directory contain a trained english acoustic model : 67.600 steps of 30 files batches 
+(3 mini-batchs of 10 files for each step).
 
 __Warning :__ This model use 3 layers, default is 5 in config file
 
 Results on LibriSpeech's test-clean evaluation set (with max_input_seq_length : 3510):
-* __CER : 19,5 %__
-* __WER : 52 %__
+* __CER : 15,2 %__
+* __WER : 42,4 %__
 
 
 ### Dataset
@@ -41,8 +41,8 @@ Then make sure to set those parameters in your config file :
     hidden_size : 1024
     dropout_input_keep_prob : 0.8
     dropout_output_keep_prob : 0.5
-    batch_size : 3
-    mini_batch_size : 10
+    batch_size : 10
+    mini_batch_size : 3
     learning_rate : 0.0003
     lr_decay_factor : 0.33
     grad_clip : 1
@@ -52,10 +52,11 @@ Then make sure to set those parameters in your config file :
     [general]
     use_config_file_if_checkpoint_exists : True
     steps_per_checkpoint : 100
+    steps_per_evaluation : 1000
     checkpoint_dir : trained_models/acoustic_model/english
         
     [training]
-    max_input_seq_length : 1800
+    max_input_seq_length : 3510
     max_target_seq_length : 600
     batch_normalization : False
     dataset_size_ordering : False
@@ -67,7 +68,7 @@ Run the model on a "less than 15 seconds long" wav file of your choice
 
 On this example file from Librispeech dev set that the model never trained on you will obtain :
 
-    it now contained only shon to clar his two wides and a selitary chicken
+    it now contained only shanetoclare his two wides and a solitary chicken
 
 the original text being :
 
@@ -89,13 +90,11 @@ Launch training and wait...
 
 ### Training graphs
 
-The learning rate was initialized at 0.0003 and was lowered when result on the test set did not improve two times
-in a row
+The learning rate was initialized at 0.0003.
 ![Learning rate](learning_rate.png)
 
 
 The error rate below is on the test set on which the rnn never train.
-Even with 3 layers the CER does not drop below 20 %
 ![Error rate on test set](error_rate_test.png)
 
 
