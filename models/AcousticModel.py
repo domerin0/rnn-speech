@@ -268,7 +268,7 @@ class AcousticModel(object):
         with tf.variable_scope('Input_Layer'):
             # TODO: review the initializer for w_i
             w_i = tf.get_variable("input_w", [self.input_dim, self.hidden_size], tf.float32,
-                                  initializer=tf.random_normal_initializer())
+                                  initializer=tf.contrib.layers.xavier_initializer())
             b_i = tf.get_variable("input_b", [self.hidden_size], tf.float32,
                                   initializer=tf.constant_initializer(0.0))
 
@@ -308,7 +308,7 @@ class AcousticModel(object):
         with tf.variable_scope('Output_layer'):
             # TODO: review the initializer for w_o
             w_o = tf.get_variable("output_w", [self.hidden_size, self.num_labels], tf.float32,
-                                  initializer=tf.random_normal_initializer())
+                                  initializer=tf.contrib.layers.xavier_initializer())
             b_o = tf.get_variable("output_b", [self.num_labels], tf.float32,
                                   initializer=tf.constant_initializer(0.0))
 
