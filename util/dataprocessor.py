@@ -14,7 +14,7 @@ except ImportError:
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_paths, audio_processor, file_cache=None, size_ordering=False,
+    def __init__(self, raw_data_paths, audio_processor, file_cache=None, size_ordering='False',
                  min_text_size=3, min_audio_size=40):
         self.raw_data_paths = raw_data_paths.replace(" ", "").split(',')
         self.audio_processor = audio_processor
@@ -27,7 +27,7 @@ class DataProcessor(object):
         # Load the file list
         data = self.load_filelist()
         if data is not None:
-            logging.info("Using audio files list from cache file.")
+            logging.info("{0} : Using audio files list from cache file.".format(self.raw_data_paths))
         else:
             data = []
             for path in self.raw_data_paths:
@@ -44,12 +44,12 @@ class DataProcessor(object):
                     raise Exception("ERROR : unknown training_dataset_type")
 
             # Adding length
-            if self.size_ordering is True:
+            if self.size_ordering == 'True' or self.size_ordering == 'First_run_only':
                 data = self.add_audio_file_length(data)
 
             # Save the file list if a cache file is provided
             if self.file_cache is not None:
-                logging.info("Saving audio files list to cache file.")
+                logging.info("{0} : Saving audio files list to cache file.".format(self.raw_data_paths))
                 self.save_filelist(data)
 
         # Check that there is data
@@ -57,11 +57,15 @@ class DataProcessor(object):
             raise Exception("ERROR : no data found in directories {0}".format(self.raw_data_paths))
 
         # Order by size ascending if needed
-        if self.size_ordering is True:
-            logging.debug("Sorting the audio files list by duration")
+        if self.size_ordering == 'True' or self.size_ordering == 'First_run_only':
+            # Check that size is present in the list (in case the cache file was produced without it)
+            if data[0][2] is None:
+                raise Exception("Cache file do not have files' length,"
+                                "please remove the cache file : {0}".format(self.file_cache))
+            logging.debug("{0} : Sorting the audio files list by duration".format(self.raw_data_paths))
             data = sorted(data, key=lambda data: data[2])
         else:
-            logging.debug("Shuffling the audio files list")
+            logging.debug("{0} : Shuffling the audio files list".format(self.raw_data_paths))
             shuffle(data)
 
         # Filtering small text items

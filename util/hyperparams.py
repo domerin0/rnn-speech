@@ -128,7 +128,9 @@ class HyperParameterHandler(object):
         if dic["tensorboard_dir"] is not None and not os.path.exists(dic["tensorboard_dir"]):
             dic["tensorboard_dir"] = None
         dic["batch_normalization"] = config.getboolean(training_section, "batch_normalization", fallback=False)
-        dic["dataset_size_ordering"] = config.getboolean(training_section, "dataset_size_ordering", fallback=False)
+        dic["dataset_size_ordering"] = config.get(training_section, "dataset_size_ordering",
+                                                  vars={'True': 'True', 'False': 'False',
+                                                        'First_run_only': 'First_run_only'}, fallback='False')
         dic["log_file"] = config.get(log_section, "log_file", fallback=None)
         log_level = config.get(log_section, "log_level", fallback='WARNING')
         dic["log_level"] = getattr(logging, log_level)

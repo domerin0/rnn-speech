@@ -12,6 +12,7 @@ import util.dataprocessor as dataprocessor
 import argparse
 from math import floor
 import logging
+from random import shuffle
 
 
 def main():
@@ -51,7 +52,7 @@ def build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_
     return model
 
 
-def train_rnn(audio_processor, hyper_params, prog_params, size_ordering=True):
+def train_rnn(audio_processor, hyper_params, prog_params, size_ordering='False'):
     # Load the train set data
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"], audio_processor,
                                                  file_cache=hyper_params["training_filelist_cache"],
@@ -88,20 +89,30 @@ def train_rnn(audio_processor, hyper_params, prog_params, size_ordering=True):
         run_options = None
 
     # Retrieve the step counter if there is a checkpoint to load
+    # TODO: find a way to retrieve the step_num without requiring to build the model
     if tf.train.get_checkpoint_state(hyper_params["checkpoint_dir"]):
         with tf.Session(config=config) as sess:
             model = build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_length=1)
             step_num = model.global_step.eval()
         tf.reset_default_graph()
     else:
-        step_num = 0
+        step_num = 1
 
     full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
 
     previous_mean_error_rate = None
+    previous_epoch = None
     while True:
+        # Evaluate the epoch number
+        epoch = ((step_num - 1) * full_run_size) // len(train_set)
+        if previous_epoch is not None and epoch != previous_epoch:
+            if size_ordering == 'False' or size_ordering == 'First_run_only':
+                logging.info("New epoch {0}: shuffling training dataset".format(epoch))
+                shuffle(train_set)
+        previous_epoch = epoch
+
         # Select training data
-        start_pos = (step_num * full_run_size) % len(train_set)
+        start_pos = ((step_num - 1) * full_run_size) % len(train_set)
         end_pos = (start_pos + (full_run_size * hyper_params["steps_per_checkpoint"])) % len(train_set)
         if end_pos > start_pos:
             session_set = train_set[start_pos:end_pos]
