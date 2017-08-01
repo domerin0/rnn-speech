@@ -1,3 +1,4 @@
 librosa
 tensorflow
 pyaudio
+numpy
