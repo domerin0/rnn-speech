@@ -21,6 +21,7 @@ import os
 from datetime import datetime
 import threading
 import logging
+from random import randint
 
 ENGLISH_CHAR_MAP = [
                     # Apostrophes with one or two letters
@@ -79,6 +80,7 @@ class AcousticModel(object):
 
         # Create object's variables for tensorflow ops
         self.rnn_state_zero_op = None
+        self.rnn_keep_state_op = None
         self.saver_op = None
 
         # Create object's variable for result output
@@ -87,6 +89,9 @@ class AcousticModel(object):
         # Create object's variables for placeholders
         self.input_keep_prob_ph = self.output_keep_prob_ph = None
         self.inputs_ph = self.input_seq_lengths_ph = None
+
+        # Create object's variable for hidden state
+        self.rnn_tuple_state = None
 
         # Create object's variables for training
         self.input_keep_prob = self.output_keep_prob = None
@@ -138,8 +143,8 @@ class AcousticModel(object):
             input_seq_lengths = self.input_seq_lengths_ph
 
         # Build the RNN
-        self.global_step, logits, self.prediction, self.rnn_state_zero_op, _, _ = \
-            self._build_base_rnn(inputs, input_seq_lengths, True)
+        self.global_step, logits, self.prediction, self.rnn_keep_state_op, self.rnn_state_zero_op,\
+            _, _, self.rnn_tuple_state = self._build_base_rnn(inputs, input_seq_lengths, True)
 
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
@@ -167,8 +172,8 @@ class AcousticModel(object):
 
         inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
 
-        self.global_step, logits, prediction, self.rnn_state_zero_op,\
-            self.input_keep_prob_ph, self.output_keep_prob_ph = self._build_base_rnn(inputs, input_seq_lengths, False)
+        self.global_step, logits, prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, self.input_keep_prob_ph,\
+            self.output_keep_prob_ph, self.rnn_tuple_state = self._build_base_rnn(inputs, input_seq_lengths, False)
 
         # Object variables used as truth label for training the RNN
         # Label tensor must be provided as a sparse tensor.
@@ -230,11 +235,13 @@ class AcousticModel(object):
         ----------
         :returns logits: each char probability for each timestep of the input, for each item of the batch
         :returns prediction: the best prediction for the input
-        :returns rnn_state_zero_op: an tensorflow op to reset the RNN internal state
+        :returns rnn_keep_state_op: a tensorflow op to save the RNN internal state for the next batch
+        :returns rnn_state_zero_op: a tensorflow op to reset the RNN internal state to zeros
         :returns input_keep_prob_ph: a placeholder for input_keep_prob of the dropout layer
                                      (None if forward_only is True)
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
+        :returns rnn_tuple_state: the RNN internal state
         """
         # Define a variable to keep track of the learning process step
         global_step = tf.Variable(0, trainable=False, name='global_step')
@@ -266,7 +273,6 @@ class AcousticModel(object):
 
         # Build the input layer between input and the RNN
         with tf.variable_scope('Input_Layer'):
-            # TODO: review the initializer for w_i
             w_i = tf.get_variable("input_w", [self.input_dim, self.hidden_size], tf.float32,
                                   initializer=tf.contrib.layers.xavier_initializer())
             b_i = tf.get_variable("input_b", [self.hidden_size], tf.float32,
@@ -287,26 +293,47 @@ class AcousticModel(object):
                 rnn_inputs = tf.nn.batch_normalization(rnn_inputs, batch_mean, batch_var, None, None,
                                                        epsilon, name="batch_norm")
 
-        # Define a variable to store the RNN state
+        # Define some variables to store the RNN state
+        # Note : tensorflow keep the state inside a batch but it's necessary to do this in order to keep the state
+        #        between batches, especially when doing live transcript
+        #        Another way would have been to get the state as an output of the session and feed it every time but
+        #        this way is much more efficient
         with tf.variable_scope('Hidden_state'):
-            hidden_state = tf.get_variable("hidden_state", [self.num_layers, 2, self.batch_size, self.hidden_size],
-                                           tf.float32, initializer=tf.constant_initializer(0.0), trainable=False)
-            # Arrange it to a tuple of LSTMStateTuple as needed
-            l = tf.unstack(hidden_state, axis=0)
-            rnn_tuple_state = tuple([tf.contrib.rnn.LSTMStateTuple(l[idx][0], l[idx][1])
-                                    for idx in range(self.num_layers)])
-
-        # Define an op to reset the hidden state to zeros
-        rnn_state_zero_op = hidden_state.assign(tf.zeros_like(hidden_state))
+            state_variables = []
+            for state_c, state_h in cell.zero_state(self.batch_size, tf.float32):
+                state_variables.append(tf.nn.rnn_cell.LSTMStateTuple(
+                    tf.Variable(state_c, trainable=False),
+                    tf.Variable(state_h, trainable=False)))
+            # Return as a tuple, so that it can be fed to dynamic_rnn as an initial state
+            rnn_tuple_state = tuple(state_variables)
 
         # Build the RNN
         with tf.name_scope('LSTM'):
-            rnn_output, _ = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=input_seq_lengths,
-                                              initial_state=rnn_tuple_state, time_major=True)
+            rnn_output, new_states = tf.nn.dynamic_rnn(cell, rnn_inputs, sequence_length=input_seq_lengths,
+                                                       initial_state=rnn_tuple_state, time_major=True)
+
+        # Define an op to keep the hidden state between batches
+        update_ops = []
+        for state_variable, new_state in zip(rnn_tuple_state, new_states):
+            # Assign the new state to the state variables on this layer
+            update_ops.extend([state_variable[0].assign(new_state[0]),
+                               state_variable[1].assign(new_state[1])])
+        # Return a tuple in order to combine all update_ops into a single operation.
+        # The tuple's actual value should not be used.
+        rnn_keep_state_op = tf.tuple(update_ops)
+
+        # Define an op to reset the hidden state to zeros
+        update_ops = []
+        for state_variable in rnn_tuple_state:
+            # Assign the new state to the state variables on this layer
+            update_ops.extend([state_variable[0].assign(tf.zeros_like(state_variable[0])),
+                               state_variable[1].assign(tf.zeros_like(state_variable[1]))])
+        # Return a tuple in order to combine all update_ops into a single operation.
+        # The tuple's actual value should not be used.
+        rnn_state_zero_op = tf.tuple(update_ops)
 
         # Build the output layer between the RNN and the char_map
         with tf.variable_scope('Output_layer'):
-            # TODO: review the initializer for w_o
             w_o = tf.get_variable("output_w", [self.hidden_size, self.num_labels], tf.float32,
                                   initializer=tf.contrib.layers.xavier_initializer())
             b_o = tf.get_variable("output_b", [self.num_labels], tf.float32,
@@ -321,7 +348,8 @@ class AcousticModel(object):
         # Set the RNN result to the best path found
         prediction = tf.to_int32(decoded[0])
 
-        return global_step, logits, prediction, rnn_state_zero_op, input_keep_prob_ph, output_keep_prob_ph
+        return global_step, logits, prediction, rnn_keep_state_op, rnn_state_zero_op,\
+            input_keep_prob_ph, output_keep_prob_ph, rnn_tuple_state
 
     def _add_training_on_rnn(self, logits, grad_clip, learning_rate, lr_decay_factor,
                              sparse_labels, input_seq_lengths, prediction):
@@ -450,6 +478,18 @@ class AcousticModel(object):
             mean_error_rate = tf.divide(self.accumulated_error_rate, self.mini_batch)
             tf.summary.scalar('Training', mean_error_rate, collections=[graphkey_training])
             tf.summary.scalar('Test', mean_error_rate, collections=[graphkey_test])
+
+        # Hidden state
+        with tf.name_scope('RNN_internal_state'):
+            for idx, state_variable in enumerate(self.rnn_tuple_state):
+                tf.summary.histogram('Training_layer-{0}_cell_state'.format(idx), state_variable[0],
+                                     collections=[graphkey_training])
+                tf.summary.histogram('Test_layer-{0}_cell_state'.format(idx), state_variable[0],
+                                     collections=[graphkey_test])
+                tf.summary.histogram('Training_layer-{0}_hidden_state'.format(idx), state_variable[1],
+                                     collections=[graphkey_training])
+                tf.summary.histogram('Test_layer-{0}_hidden_state'.format(idx), state_variable[1],
+                                     collections=[graphkey_test])
 
         self.train_summaries_op = tf.summary.merge_all(key=graphkey_training)
         self.test_summaries_op = tf.summary.merge_all(key=graphkey_test)
@@ -708,8 +748,10 @@ class AcousticModel(object):
         Returns:
         mean of ctc_loss
         """
-        # Base output is to accumulate loss, error_rate and increase the mini-batchs counter
-        output_feed = [self.mini_batch, self.acc_mean_loss_op, self.acc_error_rate_op, self.increase_mini_batch_op]
+        # Base output is to accumulate loss, error_rate, increase the mini-batchs counter and keep the hidden state for
+        # next batch
+        output_feed = [self.mini_batch, self.acc_mean_loss_op, self.acc_error_rate_op,
+                       self.increase_mini_batch_op, self.rnn_keep_state_op]
 
         if compute_gradients:
             # Add the update operation
@@ -730,8 +772,7 @@ class AcousticModel(object):
         return mini_batch_num
 
     def start_batch(self, session, is_training, run_options=None, run_metadata=None):
-        output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op,
-                  self.mini_batch_zero_op, self.rnn_state_zero_op]
+        output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op, self.mini_batch_zero_op]
 
         if is_training:
             output.append(self.acc_gradients_zero_op)
@@ -739,13 +780,17 @@ class AcousticModel(object):
         session.run(output, options=run_options, run_metadata=run_metadata)
         return
 
-    def end_batch(self, session, is_training, run_options=None, run_metadata=None):
+    def end_batch(self, session, is_training, run_options=None, run_metadata=None, rnn_state_reset_ratio=1.0):
         # Get each accumulator's value and compute the mean for the batch
         output_feed = [self.accumulated_mean_loss, self.accumulated_error_rate, self.mini_batch, self.global_step]
 
-        # Append the train_step_op if needed (it will apply the gradients)
+        # If in training...
         if is_training:
+            # Append the train_step_op (this will apply the gradients)
             output_feed.append(self.train_step_op)
+            # Reset the hidden state at the given random ratio (default to always)
+            if randint(1, 1 // rnn_state_reset_ratio) == 1:
+                output_feed.append(self.rnn_state_zero_op)
 
         # If a tensorboard dir is configured then run the merged_summaries operation
         if self.tensorboard_dir is not None:
@@ -856,9 +901,10 @@ class AcousticModel(object):
         except tf.errors.InvalidArgumentError:
             logging.debug("Queue empty, exiting evaluation step")
 
-        # Close the batch
+        # Close the batch (always reset the RNN state after each batch in evaluation mode)
         mean_loss, mean_error_rate, current_step = self.end_batch(sess, False, run_options=run_options,
-                                                                  run_metadata=run_metadata)
+                                                                  run_metadata=run_metadata,
+                                                                  rnn_state_reset_ratio=1.0)
         logging.info("Evaluation at step %d : loss %.5f - error_rate %.5f - duration %.2f",
                      current_step, mean_loss, mean_error_rate, time.time() - start_time)
 
@@ -974,7 +1020,7 @@ class AcousticModel(object):
             trace_file.write(trace.generate_chrome_trace_format())
         return time.time()
 
-    def run_train_step(self, sess, mini_batch_size, run_options=None, run_metadata=None):
+    def run_train_step(self, sess, mini_batch_size, rnn_state_reset_ratio, run_options=None, run_metadata=None):
         """
         Run a single train step 
 
@@ -982,6 +1028,9 @@ class AcousticModel(object):
         ----------
         :param sess: a tensorflow session
         :param mini_batch_size: the number of batchs to run before applying the gradients
+        :param rnn_state_reset_ratio: the ratio to which the RNN internal state will be reset to 0
+             example: 1.0 mean the RNN internal state will be reset at the end of each batch
+             example: 0.25 mean there is 25% chances that the RNN internal state will be reset at the end of each batch
         :param run_options: options parameter for the sess.run calls
         :param run_metadata: run_metadata parameter for the sess.run calls
         :returns float mean_loss: mean loss for the train batch run
@@ -1012,7 +1061,8 @@ class AcousticModel(object):
         # Close the batch if at least a mini-batch was completed
         if mini_batch_num > 0:
             mean_loss, mean_error_rate, current_step = self.end_batch(sess, True, run_options=run_options,
-                                                                      run_metadata=run_metadata)
+                                                                      run_metadata=run_metadata,
+                                                                      rnn_state_reset_ratio=rnn_state_reset_ratio)
             if self.timeline_enabled:
                 _ = self._write_timeline(run_metadata, inter_time, "end_batch")
 
@@ -1024,8 +1074,8 @@ class AcousticModel(object):
         else:
             return 0.0, 0.0, self.global_step.eval(), queueing_finished
 
-    def fit(self, sess, audio_processor, train_set, mini_batch_size, max_steps=None,
-            run_options=None, run_metadata=None):
+    def fit(self, sess, audio_processor, train_set, mini_batch_size, rnn_state_reset_ratio=1.0,
+            max_steps=None, run_options=None, run_metadata=None):
         """
         Fit the model to the given train_set.
         
@@ -1037,6 +1087,9 @@ class AcousticModel(object):
         :param audio_processor: an AudioProcessor object to convert audio files
         :param train_set: the train_set to fit
         :param mini_batch_size: the number of batchs to run before applying the gradients
+        :param rnn_state_reset_ratio: the ratio to which the RNN internal state will be reset to 0
+             default: 1.0 mean the RNN internal state will be reset at the end of each batch
+             example: 0.25 mean there is 25% chances that the RNN internal state will be reset at the end of each batch
         :param max_steps: max number of steps to run
         :param run_options: options parameter for the sess.run calls
         :param run_metadata: run_metadata parameter for the sess.run calls
@@ -1055,8 +1108,9 @@ class AcousticModel(object):
             if self.coord.should_stop():
                 break
 
-            _, _, total_steps, queueing_finished = self.run_train_step(sess, mini_batch_size, run_options=run_options,
-                                                                       run_metadata=run_metadata)
+            _, _, total_steps, queueing_finished =\
+                self.run_train_step(sess, mini_batch_size, rnn_state_reset_ratio,
+                                    run_options=run_options, run_metadata=run_metadata)
             local_steps += 1
 
             if (max_steps is not None) and (local_steps >= max_steps):

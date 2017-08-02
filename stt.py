@@ -135,8 +135,9 @@ def train_rnn(audio_processor, hyper_params, prog_params, size_ordering='False')
             local_audio_processor = audioprocessor.AudioProcessor(local_input_seq_length,
                                                                   hyper_params["signal_processing"])
             # Run training
-            step_num, _ = model.fit(sess, local_audio_processor, session_set,
-                                    hyper_params["mini_batch_size"], run_options=run_options, run_metadata=run_metadata)
+            step_num, _ = model.fit(sess, local_audio_processor, session_set, hyper_params["mini_batch_size"],
+                                    rnn_state_reset_ratio=hyper_params["rnn_state_reset_ratio"],
+                                    run_options=run_options, run_metadata=run_metadata)
             model.save(sess, hyper_params["checkpoint_dir"])
 
         tf.reset_default_graph()
