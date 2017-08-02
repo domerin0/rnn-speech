@@ -127,7 +127,7 @@ def train_rnn(audio_processor, hyper_params, prog_params, size_ordering='False')
 
         # Run a training session
         with tf.Session(config=config) as sess:
-            # create model
+            # Create model with the local max_input_seq_length for that part of the dataset
             model = build_training_rnn(sess, hyper_params, prog_params,
                                        overriden_max_input_seq_length=local_input_seq_length)
 

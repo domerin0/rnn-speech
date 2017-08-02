@@ -46,7 +46,7 @@ If you have already cloned the repository without lfs, you can download the miss
 #### Install dependencies
 ##### Required
 
-1. [TensorFlow](https://www.tensorflow.org) (>= 1.0)
+1. [TensorFlow](https://www.tensorflow.org) (>= 1.3rc1)
 1. [librosa](https://github.com/librosa/librosa)
 
 Install required dependencies by running :

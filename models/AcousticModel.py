@@ -539,7 +539,8 @@ class AcousticModel(object):
         # Define an op to save or restore the network
 
         # Only save needed tensors :
-        #   - weight and biais from the input layer, the output layer and the LSTM
+        #   - weight and biais from the input layer, the output layer
+        #   - weight and biais from the LSTM (which are named kernel and bias respectively)
         #   - currents global_step and learning_rate
 
         for var in tf.global_variables():
@@ -549,7 +550,7 @@ class AcousticModel(object):
                      if (var.name.find('/input_w:0') != -1) or (var.name.find('/input_b:0') != -1) or
                         (var.name.find('/output_w:0') != -1) or (var.name.find('/output_b:0') != -1) or
                         (var.name.find('global_step:0') != -1) or (var.name.find('learning_rate:0') != -1) or
-                        (var.name.find('/weights:0') != -1) or (var.name.find('/biases:0') != -1)]
+                        (var.name.find('/kernel:0') != -1) or (var.name.find('/bias:0') != -1)]
         if len(save_list) == 0:
             raise ValueError("Trying to define the saving operation before the RNN is built")
 

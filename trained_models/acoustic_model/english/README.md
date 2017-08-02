@@ -3,7 +3,11 @@
 This directory contain a trained english acoustic model : 67.600 steps of 30 files batches 
 (3 mini-batchs of 10 files for each step).
 
-__Warning :__ This model use 3 layers, default is 5 in config file
+__Warnings :__ 
+* This model use 3 layers, default is 5 in config file
+* Tensorflow's team _love_ to change names of variables. This pre-trained model is "name compatible" with tensorflow 1.3
+and maybe the next versions... If your result is incorrect you should set log_level to DEBUG and check if the TF
+variable names in the beginning of the log matches those listed in _add_saving_op in AcousticModel.py
 
 Results on LibriSpeech's test-clean evaluation set (with max_input_seq_length : 3510):
 * __CER : 15,2 %__
