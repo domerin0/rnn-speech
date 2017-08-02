@@ -235,13 +235,13 @@ class AcousticModel(object):
         ----------
         :returns logits: each char probability for each timestep of the input, for each item of the batch
         :returns prediction: the best prediction for the input
-        :returns rnn_keep_state_op: an tensorflow op to save the RNN internal state for the next batch
-        :returns rnn_state_zero_op: an tensorflow op to reset the RNN internal state
+        :returns rnn_keep_state_op: a tensorflow op to save the RNN internal state for the next batch
+        :returns rnn_state_zero_op: a tensorflow op to reset the RNN internal state to zeros
         :returns input_keep_prob_ph: a placeholder for input_keep_prob of the dropout layer
                                      (None if forward_only is True)
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
-        ;returns rnn_tuple_state: the RNN internal state
+        :returns rnn_tuple_state: the RNN internal state
         """
         # Define a variable to keep track of the learning process step
         global_step = tf.Variable(0, trainable=False, name='global_step')
@@ -480,10 +480,16 @@ class AcousticModel(object):
             tf.summary.scalar('Test', mean_error_rate, collections=[graphkey_test])
 
         # Hidden state
-        with tf.name_scope('Hidden_state'):
+        with tf.name_scope('RNN_internal_state'):
             for idx, state_variable in enumerate(self.rnn_tuple_state):
-                tf.summary.histogram('Training{0}_0'.format(idx), state_variable[0], collections=[graphkey_training])
-                tf.summary.histogram('Training{0}_1'.format(idx), state_variable[1], collections=[graphkey_training])
+                tf.summary.histogram('Training_layer-{0}_cell_state'.format(idx), state_variable[0],
+                                     collections=[graphkey_training])
+                tf.summary.histogram('Test_layer-{0}_cell_state'.format(idx), state_variable[0],
+                                     collections=[graphkey_test])
+                tf.summary.histogram('Training_layer-{0}_hidden_state'.format(idx), state_variable[1],
+                                     collections=[graphkey_training])
+                tf.summary.histogram('Test_layer-{0}_hidden_state'.format(idx), state_variable[1],
+                                     collections=[graphkey_test])
 
         self.train_summaries_op = tf.summary.merge_all(key=graphkey_training)
         self.test_summaries_op = tf.summary.merge_all(key=graphkey_test)
@@ -742,14 +748,10 @@ class AcousticModel(object):
         Returns:
         mean of ctc_loss
         """
-        # Base output is to accumulate loss, error_rate and increase the mini-batchs counter
-        output_feed = [self.mini_batch, self.acc_mean_loss_op, self.acc_error_rate_op, self.increase_mini_batch_op]
-
-        # Keep the hidden state 75% of the time, otherwise it will be reseted to zero
-        if randint(0, 3) > 0:
-            output_feed.append(self.rnn_keep_state_op)
-        else:
-            output_feed.append(self.rnn_state_zero_op)
+        # Base output is to accumulate loss, error_rate, increase the mini-batchs counter and keep the hidden state for
+        # next batch
+        output_feed = [self.mini_batch, self.acc_mean_loss_op, self.acc_error_rate_op,
+                       self.increase_mini_batch_op, self.rnn_keep_state_op]
 
         if compute_gradients:
             # Add the update operation
@@ -778,13 +780,17 @@ class AcousticModel(object):
         session.run(output, options=run_options, run_metadata=run_metadata)
         return
 
-    def end_batch(self, session, is_training, run_options=None, run_metadata=None):
+    def end_batch(self, session, is_training, run_options=None, run_metadata=None, rnn_state_reset_ratio=1.0):
         # Get each accumulator's value and compute the mean for the batch
         output_feed = [self.accumulated_mean_loss, self.accumulated_error_rate, self.mini_batch, self.global_step]
 
-        # Append the train_step_op if needed (it will apply the gradients)
+        # If in training...
         if is_training:
+            # Append the train_step_op (this will apply the gradients)
             output_feed.append(self.train_step_op)
+            # Reset the hidden state at the given random ratio (default to always)
+            if randint(1, 1 // rnn_state_reset_ratio) == 1:
+                output_feed.append(self.rnn_state_zero_op)
 
         # If a tensorboard dir is configured then run the merged_summaries operation
         if self.tensorboard_dir is not None:
@@ -895,9 +901,10 @@ class AcousticModel(object):
         except tf.errors.InvalidArgumentError:
             logging.debug("Queue empty, exiting evaluation step")
 
-        # Close the batch
+        # Close the batch (always reset the RNN state after each batch in evaluation mode)
         mean_loss, mean_error_rate, current_step = self.end_batch(sess, False, run_options=run_options,
-                                                                  run_metadata=run_metadata)
+                                                                  run_metadata=run_metadata,
+                                                                  rnn_state_reset_ratio=1.0)
         logging.info("Evaluation at step %d : loss %.5f - error_rate %.5f - duration %.2f",
                      current_step, mean_loss, mean_error_rate, time.time() - start_time)
 
@@ -1013,7 +1020,7 @@ class AcousticModel(object):
             trace_file.write(trace.generate_chrome_trace_format())
         return time.time()
 
-    def run_train_step(self, sess, mini_batch_size, run_options=None, run_metadata=None):
+    def run_train_step(self, sess, mini_batch_size, rnn_state_reset_ratio, run_options=None, run_metadata=None):
         """
         Run a single train step 
 
@@ -1021,6 +1028,9 @@ class AcousticModel(object):
         ----------
         :param sess: a tensorflow session
         :param mini_batch_size: the number of batchs to run before applying the gradients
+        :param rnn_state_reset_ratio: the ratio to which the RNN internal state will be reset to 0
+             example: 1.0 mean the RNN internal state will be reset at the end of each batch
+             example: 0.25 mean there is 25% chances that the RNN internal state will be reset at the end of each batch
         :param run_options: options parameter for the sess.run calls
         :param run_metadata: run_metadata parameter for the sess.run calls
         :returns float mean_loss: mean loss for the train batch run
@@ -1051,7 +1061,8 @@ class AcousticModel(object):
         # Close the batch if at least a mini-batch was completed
         if mini_batch_num > 0:
             mean_loss, mean_error_rate, current_step = self.end_batch(sess, True, run_options=run_options,
-                                                                      run_metadata=run_metadata)
+                                                                      run_metadata=run_metadata,
+                                                                      rnn_state_reset_ratio=rnn_state_reset_ratio)
             if self.timeline_enabled:
                 _ = self._write_timeline(run_metadata, inter_time, "end_batch")
 
@@ -1063,8 +1074,8 @@ class AcousticModel(object):
         else:
             return 0.0, 0.0, self.global_step.eval(), queueing_finished
 
-    def fit(self, sess, audio_processor, train_set, mini_batch_size, max_steps=None,
-            run_options=None, run_metadata=None):
+    def fit(self, sess, audio_processor, train_set, mini_batch_size, rnn_state_reset_ratio=1.0,
+            max_steps=None, run_options=None, run_metadata=None):
         """
         Fit the model to the given train_set.
         
@@ -1076,6 +1087,9 @@ class AcousticModel(object):
         :param audio_processor: an AudioProcessor object to convert audio files
         :param train_set: the train_set to fit
         :param mini_batch_size: the number of batchs to run before applying the gradients
+        :param rnn_state_reset_ratio: the ratio to which the RNN internal state will be reset to 0
+             default: 1.0 mean the RNN internal state will be reset at the end of each batch
+             example: 0.25 mean there is 25% chances that the RNN internal state will be reset at the end of each batch
         :param max_steps: max number of steps to run
         :param run_options: options parameter for the sess.run calls
         :param run_metadata: run_metadata parameter for the sess.run calls
@@ -1094,8 +1108,9 @@ class AcousticModel(object):
             if self.coord.should_stop():
                 break
 
-            _, _, total_steps, queueing_finished = self.run_train_step(sess, mini_batch_size, run_options=run_options,
-                                                                       run_metadata=run_metadata)
+            _, _, total_steps, queueing_finished =\
+                self.run_train_step(sess, mini_batch_size, rnn_state_reset_ratio,
+                                    run_options=run_options, run_metadata=run_metadata)
             local_steps += 1
 
             if (max_steps is not None) and (local_steps >= max_steps):
