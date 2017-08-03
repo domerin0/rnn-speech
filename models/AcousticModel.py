@@ -22,6 +22,7 @@ from datetime import datetime
 import threading
 import logging
 from random import randint
+import util.audioprocessor as audioprocessor
 
 ENGLISH_CHAR_MAP = [
                     # Apostrophes with one or two letters
@@ -74,8 +75,7 @@ class AcousticModel(object):
         else:
             raise ValueError("Invalid parameter 'language' for method '__init__'")
 
-        # Initialize thread management
-        self.thread_lock = threading.Lock()
+        # Initialize queues coordinator
         self.coord = None
 
         # Create object's variables for tensorflow ops
@@ -833,7 +833,11 @@ class AcousticModel(object):
         transcribed_text = [self.get_labels_str(prediction) for prediction in predictions]
         return transcribed_text
 
-    def evaluate_full(self, sess, eval_dataset, audio_processor, run_options=None, run_metadata=None):
+    def evaluate_full(self, sess, eval_dataset, input_seq_length, signal_processing,
+                      run_options=None, run_metadata=None):
+        # Create an audio_processor
+        audio_processor = audioprocessor.AudioProcessor(input_seq_length, signal_processing)
+
         wer_list = []
         cer_list = []
         file_number = 0
@@ -884,10 +888,11 @@ class AcousticModel(object):
         cer = (sum(cer_list) * 100) / float(len(cer_list))
         return wer, cer
 
-    def evaluate_basic(self, sess, eval_dataset, audio_processor, run_options=None, run_metadata=None):
+    def evaluate_basic(self, sess, eval_dataset, input_seq_length, signal_processing,
+                       run_options=None, run_metadata=None):
         start_time = time.time()
         # Create a thread to load data
-        _ = self.enqueue_data(sess, audio_processor, eval_dataset, run_forever=False,
+        _ = self.enqueue_data(sess, input_seq_length, signal_processing, eval_dataset, run_forever=False,
                               run_options=run_options, run_metadata=run_metadata)
 
         # Main evaluation loop
@@ -914,7 +919,8 @@ class AcousticModel(object):
 
         return mean_loss, mean_error_rate, current_step
 
-    def enqueue_data(self, sess, audio_processor, dataset, run_forever=False, run_options=None, run_metadata=None):
+    def enqueue_data(self, sess, input_seq_length, signal_processing, dataset,
+                     run_forever=False, run_options=None, run_metadata=None):
         # Create a coordinator for the queue if there isn't or reset the existing one
         if self.coord is None:
             self.coord = tf.train.Coordinator()
@@ -924,16 +930,19 @@ class AcousticModel(object):
         # Build a thread to process input data into the queue
         thread_local_data = threading.local()
         thread = threading.Thread(name="thread_enqueue", target=self._enqueue_data_thread,
-                                  args=(self.coord, self.thread_lock, sess, audio_processor, thread_local_data,
+                                  args=(self.coord, sess, input_seq_length, signal_processing, thread_local_data,
                                         dataset, run_forever, run_options, run_metadata))
         thread.start()
         return thread
 
-    def _enqueue_data_thread(self, coord, lock, sess, audio_processor, t_local_data, dataset,
-                             run_forever=False, run_options=None, run_metadata=None):
+    def _enqueue_data_thread(self, coord, sess, input_seq_length, signal_processing, t_local_data,
+                             dataset, run_forever=False, run_options=None, run_metadata=None):
         # Make a local copy of the dataset
         t_local_data.dataset = dataset[:]
         t_local_data.current_pos = 0
+
+        # Create an audio_processor to be used by the thread
+        audio_processor = audioprocessor.AudioProcessor(input_seq_length, signal_processing)
 
         while not coord.should_stop():
             # Start over if end is reached
@@ -958,14 +967,10 @@ class AcousticModel(object):
             t_local_data.current_pos += 1
 
             # Calculate MFCC
-            lock.acquire()
-            try:
-                t_local_data.mfcc_data, t_local_data.original_mfcc_length =\
-                    audio_processor.process_audio_file(t_local_data.file)
-                logging.debug("File %s processed, resulting a array of shape %s - original signal size is %d",
-                              t_local_data.file, t_local_data.mfcc_data.shape, t_local_data.original_mfcc_length)
-            finally:
-                lock.release()
+            t_local_data.mfcc_data, t_local_data.original_mfcc_length =\
+                audio_processor.process_audio_file(t_local_data.file)
+            logging.debug("File %s processed, resulting a array of shape %s - original signal size is %d",
+                          t_local_data.file, t_local_data.mfcc_data.shape, t_local_data.original_mfcc_length)
 
             # Convert string to numbers
             t_local_data.label_data = self.get_str_labels(t_local_data.text)
@@ -1075,7 +1080,7 @@ class AcousticModel(object):
         else:
             return 0.0, 0.0, self.global_step.eval(), queueing_finished
 
-    def fit(self, sess, audio_processor, train_set, mini_batch_size, rnn_state_reset_ratio=1.0,
+    def fit(self, sess, input_seq_length, signal_processing, train_set, mini_batch_size, rnn_state_reset_ratio=1.0,
             max_steps=None, run_options=None, run_metadata=None):
         """
         Fit the model to the given train_set.
@@ -1085,7 +1090,8 @@ class AcousticModel(object):
         Parameters
         ----------
         :param sess: a tensorflow session
-        :param audio_processor: an AudioProcessor object to convert audio files
+        :param input_seq_length: maximum length of the input sequence of the RNN
+        :param signal_processing: signal processing feature type to extract
         :param train_set: the train_set to fit
         :param mini_batch_size: the number of batchs to run before applying the gradients
         :param rnn_state_reset_ratio: the ratio to which the RNN internal state will be reset to 0
@@ -1098,7 +1104,7 @@ class AcousticModel(object):
         :return local_steps: total training steps done during this fit session
         """
         # Create a thread to load data
-        thread = self.enqueue_data(sess, audio_processor, train_set, run_forever=False,
+        thread = self.enqueue_data(sess, input_seq_length, signal_processing, train_set, run_forever=False,
                                    run_options=run_options, run_metadata=run_metadata)
 
         # Main training loop

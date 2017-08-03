@@ -5,8 +5,10 @@ It will extract the dataset.
 """
 import os
 import pickle
+import subprocess
 import logging
 from random import shuffle
+from util.audioprocessor import AudioProcessor
 try:
     import ConfigParser as configparser
 except ImportError:
@@ -14,10 +16,8 @@ except ImportError:
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_paths, audio_processor, file_cache=None, size_ordering='False',
-                 min_text_size=3, min_audio_size=40):
+    def __init__(self, raw_data_paths, file_cache=None, size_ordering='False', min_text_size=3, min_audio_size=40):
         self.raw_data_paths = raw_data_paths.replace(" ", "").split(',')
-        self.audio_processor = audio_processor
         self.size_ordering = size_ordering
         self.file_cache = file_cache
         self.min_text_size = min_text_size
@@ -127,13 +127,14 @@ class DataProcessor(object):
             files_list.extend([os.path.join(root, file) for file in files if file.endswith(files_extension)])
         return files_list
 
-    def add_audio_file_length(self, file_list):
+    @staticmethod
+    def add_audio_file_length(file_list):
         logging.info("Getting audio files duration, this could take long (%d files to process)", len(file_list))
 
         result = []
         previous_percent = 0
         for index, [audio_file, text, _] in enumerate(file_list):
-            length = self.audio_processor.get_audio_file_length(audio_file)
+            length = AudioProcessor.get_audio_file_length(audio_file)
             new_percent = int(round((index / len(file_list)) * 100))
             if new_percent != previous_percent:
                 logging.info("%d %% done", new_percent)
@@ -216,7 +217,16 @@ class DataProcessor(object):
                         wav_file = directory + "/../sph/{0}_{1}.wav".format(line_list[0], start)
                         extract_result = None
                         if not os.path.exists(wav_file):
-                            extract_result = self.audio_processor.extractWavFromSph(sph_file, wav_file, start, end)
+                            extract_result = self.extract_wav_from_sph(sph_file, wav_file, start, end)
                         if extract_result is not False:
                             result.append([wav_file, self.clean_label(line_list[6]), None])
         return result
+
+    @staticmethod
+    def extract_wav_from_sph(sph_file, wav_file, start, end):
+        try:
+            subprocess.call(["sox", sph_file, wav_file, "trim", start, "={0}".format(end)])
+        except OSError as e:
+            logging.warning("Execution failed : %s", e)
+            return False
+        return True

@@ -25,14 +25,14 @@ def main():
     hyper_params["input_dim"] = audio_processor.feature_size
 
     if prog_params['train'] is True:
-        train_set, test_set = load_training_dataset(audio_processor, hyper_params)
+        train_set, test_set = load_training_dataset(hyper_params)
         train_rnn(train_set, test_set, hyper_params, prog_params)
     elif prog_params['file'] is not None:
         process_file(audio_processor, hyper_params, prog_params['file'])
     elif prog_params['record'] is True:
         record_and_write(audio_processor, hyper_params)
     elif prog_params['evaluate'] is True:
-        evaluate(audio_processor, hyper_params)
+        evaluate(hyper_params)
 
 
 def build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_length=None):
@@ -53,15 +53,15 @@ def build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_
     return model
 
 
-def load_training_dataset(audio_processor, hyper_params):
+def load_training_dataset(hyper_params):
     # Load the train set data
-    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"], audio_processor,
+    data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"],
                                                  file_cache=hyper_params["training_filelist_cache"],
                                                  size_ordering=hyper_params["dataset_size_ordering"])
     train_set = data_processor.run()
     if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
-        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor)
+        data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"])
         test_set = data_processor.run()
     elif hyper_params["train_frac"] is not None:
         # Or use a fraction of the train set for the test set
@@ -129,13 +129,10 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
             model = build_training_rnn(sess, hyper_params, prog_params,
                                        overriden_max_input_seq_length=local_input_seq_length)
 
-            # Create a local audio_processor set for the local max_input_seq_length
-            local_audio_processor = audioprocessor.AudioProcessor(local_input_seq_length,
-                                                                  hyper_params["signal_processing"])
             # Run training
-            _, _ = model.fit(sess, local_audio_processor, session_set, hyper_params["mini_batch_size"],
-                             rnn_state_reset_ratio=hyper_params["rnn_state_reset_ratio"],
-                             run_options=run_options, run_metadata=run_metadata)
+            model.fit(sess, local_input_seq_length, hyper_params["signal_processing"], session_set,
+                      hyper_params["mini_batch_size"], rnn_state_reset_ratio=hyper_params["rnn_state_reset_ratio"],
+                      run_options=run_options, run_metadata=run_metadata)
             model.save(sess, hyper_params["checkpoint_dir"])
             step_num += hyper_params["steps_per_checkpoint"]
 
@@ -153,12 +150,9 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
                 model = build_training_rnn(sess, hyper_params, prog_params,
                                            overriden_max_input_seq_length=local_input_seq_length)
 
-                # Create a local audio_processor set for the local max_input_seq_length
-                local_audio_processor = audioprocessor.AudioProcessor(local_input_seq_length,
-                                                                      hyper_params["signal_processing"])
-
                 # Evaluate
-                mean_loss, mean_error_rate, _ = model.evaluate_basic(sess, test_set, local_audio_processor,
+                mean_loss, mean_error_rate, _ = model.evaluate_basic(sess, test_set, local_input_seq_length,
+                                                                     hyper_params["signal_processing"],
                                                                      run_options=run_options, run_metadata=run_metadata)
 
                 # Decay the learning rate if the model is not improving
@@ -201,13 +195,13 @@ def process_file(audio_processor, hyper_params, file):
         print(transcribed_text[0])
 
 
-def evaluate(audio_processor, hyper_params):
+def evaluate(hyper_params):
     if hyper_params["test_dataset_dirs"] is None:
         logging.fatal("Setting test_dataset_dirs in config file is mandatory for evaluation mode")
         return
 
     # Load the test set data
-    data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"], audio_processor)
+    data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"])
     test_set = data_processor.run()
 
     logging.info("Using %d size of test set", len(test_set))
@@ -227,7 +221,8 @@ def evaluate(audio_processor, hyper_params):
         model.initialize(sess)
         model.restore(sess, hyper_params["checkpoint_dir"])
 
-        wer, cer = model.evaluate_full(sess, test_set, audio_processor)
+        wer, cer = model.evaluate_full(sess, test_set, hyper_params["max_input_seq_length"],
+                                       hyper_params["signal_processing"])
         print("Resulting WER : {0:.3g} %".format(wer))
         print("Resulting CER : {0:.3g} %".format(cer))
         return
@@ -257,7 +252,7 @@ def record_and_write(audio_processor, hyper_params):
         while True:
             data = stream.read(_CHUNK)
             data = np.fromstring(data)
-            feat_vec, original_feat_vec_length = audio_processor.extraction_f(data, _SR)
+            feat_vec, original_feat_vec_length = audio_processor.process_signal(data, _SR)
             (a, b) = feat_vec.shape
             feat_vec = feat_vec.reshape((a, 1, b))
             result = model.process_input(sess, feat_vec, [original_feat_vec_length])

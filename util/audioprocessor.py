@@ -1,8 +1,10 @@
 # coding=utf-8
 import numpy as np
-import subprocess
 import librosa
-import logging
+
+# GLOBALS
+FRAME_STRIDE = 0.01
+FRAME_SIZE = 0.025
 
 
 class AudioProcessor(object):
@@ -13,46 +15,56 @@ class AudioProcessor(object):
         fbank is 120-dim input (mel filterbank with delta and double delta)
         """
         self.max_input_seq_length = max_input_seq_length
-        self.frame_size = 0.025
-        self.frame_stride = 0.01
         self.feature_type = feature_type
         if self.feature_type == "mfcc":
-            self.extraction_f = self._extract_mfcc
+            self._extract_function = self._extract_mfcc
             self.feature_size = 20
         elif self.feature_type == "fbank":
-            self.extraction_f = self._extract_fbank
+            self._extract_function = self._extract_fbank
             self.feature_size = 120
         else:
             raise ValueError("{0} is not a valid extraction function, \
             only fbank and mfcc are accepted.".format(self.feature_type))
 
-    def get_audio_file_length(self, file_name):
+    @staticmethod
+    def get_audio_file_length(file_name):
         """
         Evaluate the mfcc_length for a given file
         Note : returned value is an estimation, librosa will pad so the real size can be bigger (+1 to +3)
         
         :param file_name: an audio file path
-        :return: int, estimated mfcc_length
+        :return int: estimated mfcc_length
         """
         duration = librosa.core.get_duration(filename=file_name)
-        length = int(duration // self.frame_stride) - 1
+        length = int(duration // FRAME_STRIDE) - 1
         return length
 
     def process_audio_file(self, file_name):
         """
         Reads in audio file, processes it
-        
+
         :param file_name: an audio file path
         :returns: mfcc: padded feature tensor
         :returns: mfcc_length: original length of the mfcc before padding
         """
         sig, sr = librosa.load(file_name, mono=True)
-        return self.extraction_f(sig, sr)
+        return self._extract_function(sig, sr)
+
+    def process_signal(self, sig, sr):
+        """
+        Reads in audio file, processes it
+
+        :param sig: audio signal to process
+        :param sr: audio signal rate
+        :returns: mfcc: padded feature tensor
+        :returns: mfcc_length: original length of the mfcc before padding
+        """
+        return self._extract_function(sig, sr)
 
     def _extract_mfcc(self, sig, sr):
         # mfcc
-        mfcc = librosa.feature.mfcc(sig, sr, hop_length=int(round(sr * self.frame_stride)),
-                                    n_fft=int(round(sr * self.frame_size)))
+        mfcc = librosa.feature.mfcc(sig, sr, hop_length=int(round(sr * FRAME_STRIDE)),
+                                    n_fft=int(round(sr * FRAME_SIZE)))
         # mfcc is of shape (20 mfcc, time_serie)
         transposed_mfcc = mfcc.transpose()
         mfcc_length = len(transposed_mfcc)
@@ -80,7 +92,7 @@ class AudioProcessor(object):
         """
 
         emphasized_signal = np.append(sig[0], sig[1:] - 0.97 * sig[:-1])
-        frame_length, frame_step = self.frame_size * sr, self.frame_stride * sr
+        frame_length, frame_step = FRAME_SIZE * sr, FRAME_STRIDE * sr
         signal_length = len(emphasized_signal)
         frame_length = int(round(frame_length))
         frame_step = int(round(frame_step))
@@ -139,12 +151,3 @@ class AudioProcessor(object):
             fbank_feat = np.concatenate((fbank_feat, padding), 0)
         assert len(fbank_feat) == self.max_input_seq_length, "Padding incorrect..."
         return fbank_feat, fbank_length
-
-    @staticmethod
-    def extractWavFromSph(sph_file, wav_file, start, end):
-        try:
-            subprocess.call(["sox", sph_file, wav_file, "trim", start, "={0}".format(end)])
-        except OSError as e:
-            logging.warning("Execution failed : %s", e)
-            return False
-        return True

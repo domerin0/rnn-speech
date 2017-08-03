@@ -2,17 +2,14 @@
 import unittest
 import os
 import shutil
-import util.audioprocessor as audioprocessor
 import util.dataprocessor as dataprocessor
 
 
 class TestDataProcessor(unittest.TestCase):
     directory = ""
-    audio_processor = None
 
     @classmethod
     def setUpClass(cls):
-        cls.audio_processor = audioprocessor.AudioProcessor(1000)
         # Create a temp dir for testing purpose
         cwd = os.getcwd()
         cls.directory = cwd + "/test_directory/"
@@ -104,30 +101,30 @@ class TestDataProcessor(unittest.TestCase):
         self.assertEqual(data_type, "TEDLIUM")
 
     def test_get_data_librispeech(self):
-        data_processor = dataprocessor.DataProcessor(self.directory + "Libri", self.audio_processor)
+        data_processor = dataprocessor.DataProcessor(self.directory + "Libri")
         test_set = data_processor.run()
         self.assertCountEqual(test_set,
                               [[self.directory + "Libri/train-clean-100/19/198/19-198-0000.flac",
-                                "northanger abbey", 0],
+                                "northanger abbey", None],
                                [self.directory + "Libri/train-clean-100/19/198/19-198-0001.flac",
-                                "this little work", 0]
+                                "this little work", None]
                                ])
 
     def test_get_data_shtooka(self):
-        data_processor = dataprocessor.DataProcessor(self.directory + "Shtooka", self.audio_processor)
+        data_processor = dataprocessor.DataProcessor(self.directory + "Shtooka")
         test_set = data_processor.run()
         self.assertCountEqual(test_set,
-                              [[self.directory + "Shtooka/flac/eng - I_arose.flac", "i arose", 0],
-                               [self.directory + "Shtooka/flac/eng - I_ate.flac", "i ate", 0]
+                              [[self.directory + "Shtooka/flac/eng - I_arose.flac", "i arose", None],
+                               [self.directory + "Shtooka/flac/eng - I_ate.flac", "i ate", None]
                                ])
 
     def test_get_data_vystadial_2013(self):
-        data_processor = dataprocessor.DataProcessor(self.directory + "Vystadial_2013", self.audio_processor)
+        data_processor = dataprocessor.DataProcessor(self.directory + "Vystadial_2013")
         test_set = data_processor.run()
         self.assertCountEqual(test_set,
                               [[self.directory +
                                 "Vystadial_2013/data_voip_en/dev/jurcic-028-121024_234433_0013625_0013836.wav",
-                                "alright thank you and goodbye", 0]
+                                "alright thank you and goodbye", None]
                                ])
 
 if __name__ == '__main__':
