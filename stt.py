@@ -77,6 +77,18 @@ def load_training_dataset(hyper_params):
     return train_set, test_set
 
 
+def find_max_size_in_dataset(dataset, max_input_seq_length):
+    # Check that the dataset have the size information
+    if dataset[1][2] is None:
+        # Dataset does not provide size information => stick to the maximum
+        return max_input_seq_length
+    else:
+        # Dataset provide size information ==> take the max size, but never over allowed maximum
+        local_input_seq_length = max(dataset, key=lambda x: x[2])[2] + 10
+        local_input_seq_length = min(local_input_seq_length, max_input_seq_length)
+        return local_input_seq_length
+
+
 def train_rnn(train_set, test_set, hyper_params, prog_params):
     # Configure tensorflow's session
     config = tf.ConfigProto()
@@ -119,8 +131,7 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
                 shuffle(train_set)
 
         # Find max_input_seq_length for this training data
-        local_input_seq_length = max(session_set, key=lambda x: x[2])[2] + 10
-        local_input_seq_length = min(local_input_seq_length, hyper_params["max_input_seq_length"])
+        local_input_seq_length = find_max_size_in_dataset(session_set, hyper_params["max_input_seq_length"])
         logging.info("Start a session with local_input_seq_length = %d", local_input_seq_length)
 
         # Run a training session
@@ -142,8 +153,7 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
         if step_num % hyper_params["steps_per_evaluation"] == 0:
             with tf.Session(config=config) as sess:
                 # Find max_input_seq_length for this evaluation data
-                local_input_seq_length = max(test_set, key=lambda x: x[2])[2] + 10
-                local_input_seq_length = min(local_input_seq_length, hyper_params["max_input_seq_length"])
+                local_input_seq_length = find_max_size_in_dataset(test_set, hyper_params["max_input_seq_length"])
                 logging.info("Start a session with local_input_seq_length = %d", local_input_seq_length)
 
                 # create model
