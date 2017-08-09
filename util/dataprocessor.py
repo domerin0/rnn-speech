@@ -7,73 +7,70 @@ import os
 import pickle
 import subprocess
 import logging
-from random import shuffle
-from util.audioprocessor import AudioProcessor
-try:
-    import ConfigParser as configparser
-except ImportError:
-    import configparser
+import configparser
+from multiprocessing import Pool
+import mutagen
+import time
+
+
+DEFAULT_MIN_TEXT_LENGTH = 3         # Default minimum number of chars in a label to be kept into a dataset
+DEFAULT_MIN_AUDIO_LENGTH = 0.4      # Default minimum duration (in seconds) of an audio file to be kept into a dataset
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_paths, file_cache=None, size_ordering='False', min_text_size=3, min_audio_size=40):
+    def __init__(self, raw_data_paths, file_cache=None, min_text_size=DEFAULT_MIN_TEXT_LENGTH,
+                 min_audio_size=DEFAULT_MIN_AUDIO_LENGTH):
         self.raw_data_paths = raw_data_paths.replace(" ", "").split(',')
-        self.size_ordering = size_ordering
         self.file_cache = file_cache
         self.min_text_size = min_text_size
         self.min_audio_size = min_audio_size
 
-    def run(self):
         # Load the file list
-        data = self.load_filelist()
-        if data is not None:
+        cached_data = self.load_filelist()
+        if cached_data is not None:
             logging.info("{0} : Using audio files list from cache file.".format(self.raw_data_paths))
+            self.data = cached_data
         else:
-            data = []
+            self.data = []
             for path in self.raw_data_paths:
                 data_type = self.get_type(path)
                 if data_type == "Shtooka":
-                    data += self.get_data_shtooka(path)
+                    self.data += self.get_data_shtooka(path)
                 elif data_type == "Vystadial_2013":
-                    data += self.get_data_vystadial_2013(path)
+                    self.data += self.get_data_vystadial_2013(path)
                 elif data_type == "TEDLIUM":
-                    data += self.get_data_tedlium(path)
+                    self.data += self.get_data_tedlium(path)
                 elif data_type == "LibriSpeech":
-                    data += self.get_data_librispeech(path)
+                    self.data += self.get_data_librispeech(path)
                 else:
                     raise Exception("ERROR : unknown training_dataset_type")
 
             # Adding length
-            if self.size_ordering == 'True' or self.size_ordering == 'First_run_only':
-                data = self.add_audio_file_length(data)
+            logging.info("Retrieving audio duration from {0} files. Please wait.".format(len(self.data)))
+            start_time = time.time()
+            self.data = self._add_audio_length_on_dataset(self.data)
+            logging.info("--- Duration : {0}".format(time.time() - start_time))
 
             # Save the file list if a cache file is provided
             if self.file_cache is not None:
                 logging.info("{0} : Saving audio files list to cache file.".format(self.raw_data_paths))
-                self.save_filelist(data)
+                self.save_filelist(self.data)
 
         # Check that there is data
-        if len(data) == 0:
+        if len(self.data) == 0:
             raise Exception("ERROR : no data found in directories {0}".format(self.raw_data_paths))
 
-        # Order by size ascending if needed
-        if self.size_ordering == 'True' or self.size_ordering == 'First_run_only':
-            # Check that size is present in the list (in case the cache file was produced without it)
-            if data[0][2] is None:
-                raise Exception("Cache file do not have files' length,"
-                                "please remove the cache file : {0}".format(self.file_cache))
-            logging.debug("{0} : Sorting the audio files list by duration".format(self.raw_data_paths))
-            data = sorted(data, key=lambda data: data[2])
-        else:
-            logging.debug("{0} : Shuffling the audio files list".format(self.raw_data_paths))
-            shuffle(data)
-
         # Filtering small text items
-        data = [item for item in data if len(item[1]) > self.min_text_size]
-        # Filtering small files if we have the size
-        data = [item for item in data if (item[2] is None) or (item[2] > self.min_audio_size)]
+        self.data = [item for item in self.data if len(item[1]) > self.min_text_size]
+        # Filtering small files
+        self.data = [item for item in self.data if item[2] > self.min_audio_size]
 
-        return data
+    def get_ordered_dataset(self):
+        ordered_dataset = sorted(self.data, key=lambda x: x[2])
+        return ordered_dataset
+
+    def get_dataset(self):
+        return self.data
 
     @staticmethod
     def clean_label(_str):
@@ -128,19 +125,15 @@ class DataProcessor(object):
         return files_list
 
     @staticmethod
-    def add_audio_file_length(file_list):
-        logging.info("Getting audio files duration, this could take long (%d files to process)", len(file_list))
+    def _add_audio_length_on_file(audio_file, text, _length):
+        file = mutagen.File(audio_file)
+        length = file.info.length
+        return [audio_file, text, length]
 
-        result = []
-        previous_percent = 0
-        for index, [audio_file, text, _] in enumerate(file_list):
-            length = AudioProcessor.get_audio_file_length(audio_file)
-            new_percent = int(round((index / len(file_list)) * 100))
-            if new_percent != previous_percent:
-                logging.info("%d %% done", new_percent)
-                previous_percent = new_percent
-            result.append([audio_file, text, length])
-
+    @staticmethod
+    def _add_audio_length_on_dataset(file_list):
+        with Pool() as p:
+            result = p.starmap(DataProcessor._add_audio_length_on_file, file_list)
         return result
 
     def save_filelist(self, data):

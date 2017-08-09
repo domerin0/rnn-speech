@@ -102,7 +102,7 @@ class TestDataProcessor(unittest.TestCase):
 
     def test_get_data_librispeech(self):
         data_processor = dataprocessor.DataProcessor(self.directory + "Libri")
-        test_set = data_processor.run()
+        test_set = data_processor.get_dataset()
         self.assertCountEqual(test_set,
                               [[self.directory + "Libri/train-clean-100/19/198/19-198-0000.flac",
                                 "northanger abbey", None],
@@ -112,7 +112,7 @@ class TestDataProcessor(unittest.TestCase):
 
     def test_get_data_shtooka(self):
         data_processor = dataprocessor.DataProcessor(self.directory + "Shtooka")
-        test_set = data_processor.run()
+        test_set = data_processor.get_dataset()
         self.assertCountEqual(test_set,
                               [[self.directory + "Shtooka/flac/eng - I_arose.flac", "i arose", None],
                                [self.directory + "Shtooka/flac/eng - I_ate.flac", "i ate", None]
@@ -120,7 +120,7 @@ class TestDataProcessor(unittest.TestCase):
 
     def test_get_data_vystadial_2013(self):
         data_processor = dataprocessor.DataProcessor(self.directory + "Vystadial_2013")
-        test_set = data_processor.run()
+        test_set = data_processor.get_dataset()
         self.assertCountEqual(test_set,
                               [[self.directory +
                                 "Vystadial_2013/data_voip_en/dev/jurcic-028-121024_234433_0013625_0013836.wav",
