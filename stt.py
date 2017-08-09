@@ -56,13 +56,15 @@ def build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_
 def load_training_dataset(hyper_params):
     # Load the train set data
     data_processor = dataprocessor.DataProcessor(hyper_params["training_dataset_dirs"],
-                                                 file_cache=hyper_params["training_filelist_cache"],
-                                                 size_ordering=hyper_params["dataset_size_ordering"])
-    train_set = data_processor.run()
+                                                 file_cache=hyper_params["training_filelist_cache"])
+    if hyper_params["dataset_size_ordering"] in ['True', 'First_run_only']:
+        train_set = data_processor.get_ordered_dataset()
+    else:
+        train_set = shuffle(data_processor.get_dataset())
     if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
         data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"])
-        test_set = data_processor.run()
+        test_set = data_processor.get_dataset()
     elif hyper_params["train_frac"] is not None:
         # Or use a fraction of the train set for the test set
         num_train = max(1, int(floor(hyper_params["train_frac"] * len(train_set))))
@@ -78,15 +80,11 @@ def load_training_dataset(hyper_params):
 
 
 def find_max_size_in_dataset(dataset, max_input_seq_length):
-    # Check that the dataset have the size information
-    if dataset[1][2] is None:
-        # Dataset does not provide size information => stick to the maximum
-        return max_input_seq_length
-    else:
-        # Dataset provide size information ==> take the max size, but never over allowed maximum
-        local_input_seq_length = max(dataset, key=lambda x: x[2])[2] + 10
-        local_input_seq_length = min(local_input_seq_length, max_input_seq_length)
-        return local_input_seq_length
+    # Dataset provide duration information ==> take the max duration, but never over allowed maximum
+    max_duration = max(dataset, key=lambda x: x[2])[2]
+    local_input_seq_length = audioprocessor.AudioProcessor.get_mfcc_length_from_duration(max_duration)
+    local_input_seq_length = min(local_input_seq_length, max_input_seq_length)
+    return local_input_seq_length
 
 
 def train_rnn(train_set, test_set, hyper_params, prog_params):
@@ -212,7 +210,7 @@ def evaluate(hyper_params):
 
     # Load the test set data
     data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"])
-    test_set = data_processor.run()
+    test_set = data_processor.get_dataset()
 
     logging.info("Using %d size of test set", len(test_set))
 

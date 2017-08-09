@@ -27,15 +27,14 @@ class AudioProcessor(object):
             only fbank and mfcc are accepted.".format(self.feature_type))
 
     @staticmethod
-    def get_audio_file_length(file_name):
+    def get_mfcc_length_from_duration(duration):
         """
         Evaluate the mfcc_length for a given file
         Note : returned value is an estimation, librosa will pad so the real size can be bigger (+1 to +3)
         
-        :param file_name: an audio file path
+        :param float duration: duration of the audio file in seconds
         :return int: estimated mfcc_length
         """
-        duration = librosa.core.get_duration(filename=file_name)
         length = int(duration // FRAME_STRIDE) - 1
         return length
 
