@@ -751,7 +751,7 @@ class AcousticModel(object):
         """
         # Base output is to accumulate loss, error_rate, increase the mini-batchs counter and keep the hidden state for
         # next batch
-        output_feed = [self.mini_batch, self.acc_mean_loss_op, self.acc_error_rate_op,
+        output_feed = [self.acc_mean_loss_op, self.acc_error_rate_op,
                        self.increase_mini_batch_op, self.rnn_keep_state_op]
 
         if compute_gradients:
@@ -767,8 +767,8 @@ class AcousticModel(object):
         # Actually run the tensorflow session
         start_time = time.time()
         logging.debug("Starting a step")
-        outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
-        mini_batch_num = outputs[0]
+        session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
+        mini_batch_num = self.mini_batch.eval()
         logging.debug("Step duration : %.2f", time.time() - start_time)
         return mini_batch_num
 
