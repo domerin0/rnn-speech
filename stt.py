@@ -26,7 +26,7 @@ def main():
 
     if prog_params['train'] is True:
         train_set, test_set = load_training_dataset(hyper_params)
-        train_rnn(train_set, test_set, hyper_params, prog_params)
+        train_rnn_with_dataset(train_set, test_set, hyper_params, prog_params)
     elif prog_params['file'] is not None:
         process_file(audio_processor, hyper_params, prog_params['file'])
     elif prog_params['record'] is True:
@@ -60,7 +60,8 @@ def load_training_dataset(hyper_params):
     if hyper_params["dataset_size_ordering"] in ['True', 'First_run_only']:
         train_set = data_processor.get_ordered_dataset()
     else:
-        train_set = shuffle(data_processor.get_dataset())
+        train_set = data_processor.get_dataset()
+        shuffle(train_set)
     if hyper_params["test_dataset_dirs"] is not None:
         # Load the test set data
         data_processor = dataprocessor.DataProcessor(hyper_params["test_dataset_dirs"])
@@ -179,6 +180,99 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
 
         if (prog_params["max_epoch"] is not None) and (epoch > prog_params["max_epoch"]):
             break
+
+
+def train_rnn_with_dataset(train_set, _test_set, hyper_params, prog_params):
+    # Configure tensorflow's session
+    config = tf.ConfigProto()
+    jit_level = 0
+    if prog_params["XLA"]:
+        # Turns on XLA JIT compilation.
+        jit_level = tf.OptimizerOptions.ON_1
+    config.graph_options.optimizer_options.global_jit_level = jit_level
+    run_metadata = tf.RunMetadata()
+
+    # Add timeline data generation options if needed
+    if prog_params["timeline"] is True:
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    else:
+        run_options = None
+
+    with tf.Session(config=config) as sess:
+        # Initialize the model
+        model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], hyper_params["batch_size"],
+                              hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
+                              hyper_params["input_dim"], hyper_params["batch_normalization"],
+                              language=hyper_params["language"])
+
+        # Create a Dataset from the train_set
+        audio_streams = [item[0] for item in train_set]
+        labels = [item[1] for item in train_set]
+        audio_lengths = [item[2] for item in train_set]
+
+        audio_dataset = tf.contrib.data.Dataset.from_tensor_slices(audio_streams)
+        label_dataset = tf.contrib.data.Dataset.from_tensor_slices(labels)
+        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.int32))
+
+        # Read audio data and convert string labels
+        def _read_audio(filename):
+            # Need to convert back to string because tf.py_func changed it to a numpy array
+            filename = str(filename, encoding='UTF-8')
+            audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
+                                                            hyper_params["signal_processing"])
+            audio_decoded, _ = audio_processor.process_audio_file(filename)
+            return np.array(audio_decoded, dtype=np.float32)
+
+        def _transcode_label(label):
+            # Need to convert back to string because tf.py_func changed it to a numpy array
+            label = str(label, encoding='UTF-8')
+            label_transcoded = model.get_str_labels(label)
+            return np.array(label_transcoded, dtype=np.int32)
+
+        audio_dataset = audio_dataset.map(lambda filename: tf.py_func(_read_audio, [filename], tf.float32),
+                                          num_threads=2, output_buffer_size=30)
+        label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
+                                          num_threads=2, output_buffer_size=30)
+
+        # Batch the datasets
+        audio_dataset = audio_dataset.padded_batch(hyper_params["batch_size"], padded_shapes=[None, None])
+        label_dataset = label_dataset.dense_to_sparse_batch(batch_size=hyper_params["batch_size"],
+                                                            row_shape=[hyper_params["max_target_seq_length"]])
+        audio_length_dataset = audio_length_dataset.batch(hyper_params["batch_size"])
+
+        # And zip them together
+        dataset = tf.contrib.data.Dataset.zip((audio_dataset, audio_length_dataset, label_dataset))
+
+        # TODO: Add a shuffle operation ?
+        # dataset = dataset.shuffle(1000)
+
+        # Create an iterator on the Dataset
+        iterator = dataset.make_one_shot_iterator()
+
+        # Create the model
+        model.create_training_rnn(hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
+                                  hyper_params["grad_clip"], hyper_params["learning_rate"],
+                                  hyper_params["lr_decay_factor"], with_input_queue=False, iterator=iterator)
+        model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
+        model.initialize(sess)
+        model.restore(sess, hyper_params["checkpoint_dir"])
+
+        step_num = 0
+        while True:
+            # Launch training
+            for _ in range(hyper_params["steps_per_checkpoint"]):
+                model.run_train_step(sess, hyper_params["mini_batch_size"], hyper_params["rnn_state_reset_ratio"],
+                                     run_options=run_options, run_metadata=run_metadata)
+            step_num += hyper_params["steps_per_checkpoint"]
+
+            # Save the model
+            model.save(sess, hyper_params["checkpoint_dir"])
+
+            # Run an evaluation session
+            if step_num % hyper_params["steps_per_evaluation"] == 0:
+                # TODO: add a dataset for test set and run an evaluation
+                print("Should do an evaluation")
+    return
 
 
 def process_file(audio_processor, hyper_params, file):

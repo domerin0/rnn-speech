@@ -88,7 +88,7 @@ class AcousticModel(object):
 
         # Create object's variables for placeholders
         self.input_keep_prob_ph = self.output_keep_prob_ph = None
-        self.inputs_ph = self.input_seq_lengths_ph = None
+        self.inputs_ph = self.input_seq_lengths_ph = self.labels_ph = None
 
         # Create object's variable for hidden state
         self.rnn_tuple_state = None
@@ -151,7 +151,8 @@ class AcousticModel(object):
 
         return logits
 
-    def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor):
+    def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor,
+                            with_input_queue=True, iterator=None):
         """
         Create the training RNN
 
@@ -162,6 +163,7 @@ class AcousticModel(object):
         :param grad_clip: max gradient size (prevent exploding gradients)
         :param learning_rate: learning rate parameter fed to optimizer
         :param lr_decay_factor: decay factor of the learning rate
+        :param with_input_queue: create an input queue for the model, if false placeholders are created instead
         """
         if self.rnn_created:
             logging.fatal("Trying to create the acoustic RNN but it is already.")
@@ -170,18 +172,38 @@ class AcousticModel(object):
         self.input_keep_prob = input_keep_prob
         self.output_keep_prob = output_keep_prob
 
-        inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
+        if iterator is not None:
+            mfcc_batch, input_seq_lengths, label_batch = iterator.get_next()
+            # Transpose mfcc_batch in order to get time serie as first dimension
+            # [batch_size, time_serie, input_dim] ====> [time_serie, batch_size, input_dim]
+            inputs = tf.transpose(mfcc_batch, perm=[1, 0, 2])
+            # Label tensor must be provided as a sparse tensor.
+            sparse_labels = tf.SparseTensor(label_batch[0], label_batch[1], label_batch[2])
+        else:
+            if with_input_queue:
+                # Create a queue
+                inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
+            else:
+                # Set placeholders for input
+                self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
+                                                name="inputs_ph")
+
+                self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
+                self.labels_ph = tf.placeholder(tf.uint8, shape=[None, self.max_target_seq_length],
+                                                name="labels_ph")
+                inputs = self.inputs_ph
+                input_seq_lengths = self.input_seq_lengths_ph
+                label_batch = self.labels_ph
+
+            # Label tensor must be provided as a sparse tensor.
+            # First get indexes from non-zero positions
+            idx = tf.where(tf.not_equal(label_batch, 0))
+            # Then build a sparse tensor from indexes
+            sparse_labels = tf.SparseTensor(idx, tf.gather_nd(label_batch, idx),
+                                            [self.batch_size, self.max_target_seq_length])
 
         self.global_step, logits, prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, self.input_keep_prob_ph,\
             self.output_keep_prob_ph, self.rnn_tuple_state = self._build_base_rnn(inputs, input_seq_lengths, False)
-
-        # Object variables used as truth label for training the RNN
-        # Label tensor must be provided as a sparse tensor.
-        # First get indexes from non-zero positions
-        idx = tf.where(tf.not_equal(label_batch, 0))
-        # Then build a sparse tensor from indexes
-        sparse_labels = tf.SparseTensor(idx, tf.gather_nd(label_batch, idx),
-                                        [self.batch_size, self.max_target_seq_length])
 
         # Add the train part to the network
         self.learning_rate_var = self._add_training_on_rnn(logits, grad_clip, learning_rate, lr_decay_factor,
@@ -609,7 +631,9 @@ class AcousticModel(object):
                 continue
             except ValueError:
                 logging.warning("Unable to process label : %s", _str)
-                return []
+                # Add the EOS char and return what was processed
+                result.append(len(self.char_map) - 1)
+                return result
         return result
 
     def get_labels_str(self, label):
