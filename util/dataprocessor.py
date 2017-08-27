@@ -127,7 +127,12 @@ class DataProcessor(object):
     @staticmethod
     def _add_audio_length_on_file(audio_file, text, _length):
         file = mutagen.File(audio_file)
-        length = file.info.length
+        try:
+            length = file.info.length
+        except AttributeError:
+            # In case the type was not recognized by mutagen
+            logging.warning("Audio file incorrect : %s", audio_file)
+            length = 0
         return [audio_file, text, length]
 
     @staticmethod
