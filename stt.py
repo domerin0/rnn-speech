@@ -13,6 +13,7 @@ import argparse
 from math import floor
 import logging
 from random import shuffle
+import sys
 
 
 def main():
@@ -26,7 +27,7 @@ def main():
 
     if prog_params['train'] is True:
         train_set, test_set = load_training_dataset(hyper_params)
-        train_rnn_with_dataset(train_set, test_set, hyper_params, prog_params)
+        train_rnn(train_set, test_set, hyper_params, prog_params)
     elif prog_params['file'] is not None:
         process_file(audio_processor, hyper_params, prog_params['file'])
     elif prog_params['record'] is True:
@@ -35,22 +36,37 @@ def main():
         evaluate(hyper_params)
 
 
-def build_training_rnn(sess, hyper_params, prog_params, overriden_max_input_seq_length=None):
-    if overriden_max_input_seq_length is None:
-        overriden_max_input_seq_length = hyper_params["max_input_seq_length"]
+def build_training_rnn(sess, hyper_params, prog_params, train_set, test_set):
     model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], hyper_params["batch_size"],
-                          overriden_max_input_seq_length, hyper_params["max_target_seq_length"],
+                          hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
                           hyper_params["input_dim"], hyper_params["batch_normalization"],
                           language=hyper_params["language"])
 
+    # Create a Dataset from the train_set and the test_set
+    train_dataset = model.build_dataset(train_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
+                                        hyper_params["max_target_seq_length"], hyper_params["signal_processing"])
+
+    t_iterator = v_iterator = None
+    if test_set is []:
+        t_iterator = model.add_dataset_input(train_dataset)
+        sess.run(t_iterator.initializer)
+    else:
+        test_dataset = model.build_dataset(test_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
+                                           hyper_params["max_target_seq_length"], hyper_params["signal_processing"])
+
+        # Build the input stream from the different datasets
+        t_iterator, v_iterator = model.add_datasets_input(train_dataset, test_dataset)
+        sess.run(t_iterator.initializer)
+        sess.run(v_iterator.initializer)
+
+    # Create the model
     model.create_training_rnn(hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
                               hyper_params["grad_clip"], hyper_params["learning_rate"],
-                              hyper_params["lr_decay_factor"])
-
+                              hyper_params["lr_decay_factor"], use_iterator=True)
     model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
     model.initialize(sess)
     model.restore(sess, hyper_params["checkpoint_dir"])
-    return model
+    return model, t_iterator, v_iterator
 
 
 def load_training_dataset(hyper_params):
@@ -80,198 +96,83 @@ def load_training_dataset(hyper_params):
     return train_set, test_set
 
 
-def find_max_size_in_dataset(dataset, max_input_seq_length):
-    # Dataset provide duration information ==> take the max duration, but never over allowed maximum
-    max_duration = max(dataset, key=lambda x: x[2])[2]
-    local_input_seq_length = audioprocessor.AudioProcessor.get_mfcc_length_from_duration(max_duration)
-    local_input_seq_length = min(local_input_seq_length, max_input_seq_length)
-    return local_input_seq_length
+def configure_tf_session(xla, timeline):
+    # Configure tensorflow's session
+    config = tf.ConfigProto()
+    jit_level = 0
+    if xla:
+        # Turns on XLA JIT compilation.
+        jit_level = tf.OptimizerOptions.ON_1
+    config.graph_options.optimizer_options.global_jit_level = jit_level
+    run_metadata = tf.RunMetadata()
+
+    # Add timeline data generation options if needed
+    if timeline is True:
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    else:
+        run_options = None
+    return config, run_metadata, run_options
 
 
 def train_rnn(train_set, test_set, hyper_params, prog_params):
-    # Configure tensorflow's session
-    config = tf.ConfigProto()
-    jit_level = 0
-    if prog_params["XLA"]:
-        # Turns on XLA JIT compilation.
-        jit_level = tf.OptimizerOptions.ON_1
-    config.graph_options.optimizer_options.global_jit_level = jit_level
-    run_metadata = tf.RunMetadata()
-
-    # Add timeline data generation options if needed
-    if prog_params["timeline"] is True:
-        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-    else:
-        run_options = None
-
-    full_run_size = hyper_params["batch_size"] * hyper_params["mini_batch_size"]
-    end_pos = None
-    previous_mean_error_rate = None
-    step_num = 0
-    epoch = 1
-    while True:
-        # Select training data
-        if end_pos is None:
-            start_pos = prog_params["start_from"]
-            if start_pos > len(train_set):
-                raise ValueError("Invalid program parameter 'start_from' : higher than training dataset size")
-        else:
-            start_pos = end_pos
-        end_pos = (start_pos + (full_run_size * hyper_params["steps_per_checkpoint"])) % len(train_set)
-        # Check if end of training set is reached
-        if end_pos > start_pos:
-            session_set = train_set[start_pos:end_pos]
-        else:
-            session_set = train_set[start_pos:]
-            session_set += train_set[:end_pos]
-            epoch += 1
-            if hyper_params["dataset_size_ordering"] in ['False', 'First_run_only']:
-                logging.info("New epoch {0}: shuffling training dataset for next time".format(epoch))
-                shuffle(train_set)
-
-        # Find max_input_seq_length for this training data
-        local_input_seq_length = find_max_size_in_dataset(session_set, hyper_params["max_input_seq_length"])
-        logging.info("Start a session with local_input_seq_length = %d", local_input_seq_length)
-
-        # Run a training session
-        with tf.Session(config=config) as sess:
-            # Create model with the local max_input_seq_length for that part of the dataset
-            model = build_training_rnn(sess, hyper_params, prog_params,
-                                       overriden_max_input_seq_length=local_input_seq_length)
-
-            # Run training
-            model.fit(sess, local_input_seq_length, hyper_params["signal_processing"], session_set,
-                      hyper_params["mini_batch_size"], rnn_state_reset_ratio=hyper_params["rnn_state_reset_ratio"],
-                      run_options=run_options, run_metadata=run_metadata)
-            model.save(sess, hyper_params["checkpoint_dir"])
-            step_num += hyper_params["steps_per_checkpoint"]
-
-        tf.reset_default_graph()
-
-        # Run an evaluation session
-        if step_num % hyper_params["steps_per_evaluation"] == 0:
-            with tf.Session(config=config) as sess:
-                # Find max_input_seq_length for this evaluation data
-                local_input_seq_length = find_max_size_in_dataset(test_set, hyper_params["max_input_seq_length"])
-                logging.info("Start a session with local_input_seq_length = %d", local_input_seq_length)
-
-                # create model
-                model = build_training_rnn(sess, hyper_params, prog_params,
-                                           overriden_max_input_seq_length=local_input_seq_length)
-
-                # Evaluate
-                mean_loss, mean_error_rate, _ = model.evaluate_basic(sess, test_set, local_input_seq_length,
-                                                                     hyper_params["signal_processing"],
-                                                                     run_options=run_options, run_metadata=run_metadata)
-
-                # Decay the learning rate if the model is not improving
-                if previous_mean_error_rate is not None:
-                    if mean_error_rate > previous_mean_error_rate:
-                        sess.run(model.learning_rate_decay_op)
-                        logging.info("Model is not improving, decaying the learning rate")
-                        if model.learning_rate_var.eval() < 1e-7:
-                            logging.info("Learning rate is too low, exiting")
-                            break
-                        model.save(sess, hyper_params["checkpoint_dir"])
-                        logging.info("Overwriting the checkpoint file with the new learning rate")
-                previous_mean_error_rate = mean_error_rate
-
-            tf.reset_default_graph()
-
-        if (prog_params["max_epoch"] is not None) and (epoch > prog_params["max_epoch"]):
-            break
-
-
-def train_rnn_with_dataset(train_set, _test_set, hyper_params, prog_params):
-    # Configure tensorflow's session
-    config = tf.ConfigProto()
-    jit_level = 0
-    if prog_params["XLA"]:
-        # Turns on XLA JIT compilation.
-        jit_level = tf.OptimizerOptions.ON_1
-    config.graph_options.optimizer_options.global_jit_level = jit_level
-    run_metadata = tf.RunMetadata()
-
-    # Add timeline data generation options if needed
-    if prog_params["timeline"] is True:
-        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-    else:
-        run_options = None
+    config, run_metadata, run_options = configure_tf_session(prog_params["XLA"], prog_params["timeline"])
 
     with tf.Session(config=config) as sess:
         # Initialize the model
-        model = AcousticModel(hyper_params["num_layers"], hyper_params["hidden_size"], hyper_params["batch_size"],
-                              hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
-                              hyper_params["input_dim"], hyper_params["batch_normalization"],
-                              language=hyper_params["language"])
+        model, t_iterator, v_iterator = build_training_rnn(sess, hyper_params, prog_params, train_set, test_set)
 
-        # Create a Dataset from the train_set
-        audio_streams = [item[0] for item in train_set]
-        labels = [item[1] for item in train_set]
-        audio_lengths = [item[2] for item in train_set]
-
-        audio_dataset = tf.contrib.data.Dataset.from_tensor_slices(audio_streams)
-        label_dataset = tf.contrib.data.Dataset.from_tensor_slices(labels)
-        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.int32))
-
-        # Read audio data and convert string labels
-        def _read_audio(filename):
-            # Need to convert back to string because tf.py_func changed it to a numpy array
-            filename = str(filename, encoding='UTF-8')
-            audio_processor = audioprocessor.AudioProcessor(hyper_params["max_input_seq_length"],
-                                                            hyper_params["signal_processing"])
-            audio_decoded, _ = audio_processor.process_audio_file(filename)
-            return np.array(audio_decoded, dtype=np.float32)
-
-        def _transcode_label(label):
-            # Need to convert back to string because tf.py_func changed it to a numpy array
-            label = str(label, encoding='UTF-8')
-            label_transcoded = model.get_str_labels(label)
-            return np.array(label_transcoded, dtype=np.int32)
-
-        audio_dataset = audio_dataset.map(lambda filename: tf.py_func(_read_audio, [filename], tf.float32),
-                                          num_threads=2, output_buffer_size=30)
-        label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
-                                          num_threads=2, output_buffer_size=30)
-
-        # Batch the datasets
-        audio_dataset = audio_dataset.padded_batch(hyper_params["batch_size"], padded_shapes=[None, None])
-        label_dataset = label_dataset.dense_to_sparse_batch(batch_size=hyper_params["batch_size"],
-                                                            row_shape=[hyper_params["max_target_seq_length"]])
-        audio_length_dataset = audio_length_dataset.batch(hyper_params["batch_size"])
-
-        # And zip them together
-        dataset = tf.contrib.data.Dataset.zip((audio_dataset, audio_length_dataset, label_dataset))
-
-        # TODO: Add a shuffle operation ?
-        # dataset = dataset.shuffle(1000)
-
-        # Create an iterator on the Dataset
-        iterator = dataset.make_one_shot_iterator()
-
-        # Create the model
-        model.create_training_rnn(hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
-                                  hyper_params["grad_clip"], hyper_params["learning_rate"],
-                                  hyper_params["lr_decay_factor"], with_input_queue=False, iterator=iterator)
-        model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
-        model.initialize(sess)
-        model.restore(sess, hyper_params["checkpoint_dir"])
-
-        step_num = 0
+        previous_mean_error_rates = []
+        current_step = epoch = 0
         while True:
             # Launch training
             for _ in range(hyper_params["steps_per_checkpoint"]):
-                model.run_train_step(sess, hyper_params["mini_batch_size"], hyper_params["rnn_state_reset_ratio"],
-                                     run_options=run_options, run_metadata=run_metadata)
-            step_num += hyper_params["steps_per_checkpoint"]
+                mean_loss, mean_error_rate, current_step, dataset_empty =\
+                    model.run_train_step(sess, hyper_params["mini_batch_size"], hyper_params["rnn_state_reset_ratio"],
+                                         run_options=run_options, run_metadata=run_metadata)
+                if dataset_empty is True:
+                    epoch += 1
+                    logging.info("End of epoch number : %d", epoch)
+                    if (prog_params["max_epoch"] is not None) and (epoch > prog_params["max_epoch"]):
+                        logging.info("Max number of epochs reached, exiting train step")
+                        break
+                    else:
+                        # Rebuild the train dataset, shuffle it before if needed
+                        if hyper_params["dataset_size_ordering"] in ['False', 'First_run_only']:
+                            logging.info("Shuffling the training dataset")
+                            shuffle(train_set)
+                            train_dataset = model.build_dataset(train_set, hyper_params["batch_size"],
+                                                            hyper_params["max_input_seq_length"],
+                                                            hyper_params["max_target_seq_length"],
+                                                            hyper_params["signal_processing"])
+                            sess.run(t_iterator.make_initializer(train_dataset))
+                        else:
+                            logging.info("Reuse the same training dataset")
+                            sess.run(t_iterator.initializer)
 
             # Save the model
             model.save(sess, hyper_params["checkpoint_dir"])
 
             # Run an evaluation session
-            if step_num % hyper_params["steps_per_evaluation"] == 0:
-                # TODO: add a dataset for test set and run an evaluation
-                print("Should do an evaluation")
+            if (current_step % hyper_params["steps_per_evaluation"] == 0) and (v_iterator is not None):
+                model.run_evaluation(sess, run_options=run_options, run_metadata=run_metadata)
+                sess.run(v_iterator.initializer)
+
+            # Decay the learning rate if the model is not improving
+            if mean_error_rate <= min(previous_mean_error_rates, default=sys.maxsize):
+                previous_mean_error_rates.clear()
+            previous_mean_error_rates.append(mean_error_rate)
+            if len(previous_mean_error_rates) >= 7:
+                sess.run(model.learning_rate_decay_op)
+                logging.info("Model is not improving, decaying the learning rate")
+                if model.learning_rate_var.eval() < 1e-7:
+                    logging.info("Learning rate is too low, exiting")
+                    break
+                model.save(sess, hyper_params["checkpoint_dir"])
+                logging.info("Overwriting the checkpoint file with the new learning rate")
+
+            if (prog_params["max_epoch"] is not None) and (epoch > prog_params["max_epoch"]):
+                logging.info("Max number of epochs reached, exiting training session")
+                break
     return
 
 
@@ -287,7 +188,7 @@ def process_file(audio_processor, hyper_params, file):
                               hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
                               hyper_params["input_dim"], hyper_params["batch_normalization"],
                               language=hyper_params["language"])
-        model.create_forward_rnn(with_input_queue=False)
+        model.create_forward_rnn()
         model.initialize(sess)
         model.restore(sess, hyper_params["checkpoint_dir"])
 

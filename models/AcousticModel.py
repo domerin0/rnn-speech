@@ -19,7 +19,6 @@ import numpy as np
 import time
 import os
 from datetime import datetime
-import threading
 import logging
 from random import randint
 import util.audioprocessor as audioprocessor
@@ -90,15 +89,15 @@ class AcousticModel(object):
         self.input_keep_prob_ph = self.output_keep_prob_ph = None
         self.inputs_ph = self.input_seq_lengths_ph = self.labels_ph = None
 
+        # Create object's variables for dataset's iterator input
+        self.iterator_get_next_op = None
+        self.is_training_var = tf.Variable(initial_value=False, trainable=False, name="is_training_var", dtype=tf.bool)
+
         # Create object's variable for hidden state
         self.rnn_tuple_state = None
 
         # Create object's variables for training
         self.input_keep_prob = self.output_keep_prob = None
-        self.queue = None
-        self.queue_capacity = None
-        self.queue_input_ph = self.queue_input_length_ph = self.queue_label_ph = None
-        self.enqueue_op = None
         self.global_step = None
         self.learning_rate_var = None
         # Create object variables for tensorflow training's ops
@@ -119,7 +118,7 @@ class AcousticModel(object):
         # Create object's variables for status checking
         self.rnn_created = False
 
-    def create_forward_rnn(self, with_input_queue=False):
+    def create_forward_rnn(self):
         """
         Create the forward-only RNN
 
@@ -130,21 +129,15 @@ class AcousticModel(object):
         if self.rnn_created:
             logging.fatal("Trying to create the acoustic RNN but it is already.")
 
-        if with_input_queue:
-            # Create a queue
-            inputs, input_seq_lengths, _, _ = self._create_input_queue()
-        else:
-            # Set placeholders for input
-            self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
-                                            name="inputs_ph")
+        # Set placeholders for input
+        self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
+                                        name="inputs_ph")
 
-            self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
-            inputs = self.inputs_ph
-            input_seq_lengths = self.input_seq_lengths_ph
+        self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
 
         # Build the RNN
         self.global_step, logits, self.prediction, self.rnn_keep_state_op, self.rnn_state_zero_op,\
-            _, _, self.rnn_tuple_state = self._build_base_rnn(inputs, input_seq_lengths, True)
+            _, _, self.rnn_tuple_state = self._build_base_rnn(self.inputs_ph, self.input_seq_lengths_ph, True)
 
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
@@ -152,7 +145,7 @@ class AcousticModel(object):
         return logits
 
     def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor,
-                            with_input_queue=True, iterator=None):
+                            use_iterator=False):
         """
         Create the training RNN
 
@@ -163,7 +156,8 @@ class AcousticModel(object):
         :param grad_clip: max gradient size (prevent exploding gradients)
         :param learning_rate: learning rate parameter fed to optimizer
         :param lr_decay_factor: decay factor of the learning rate
-        :param with_input_queue: create an input queue for the model, if false placeholders are created instead
+        :param use_iterator: if True then plug an iterator.get_next() operation for the input of the model, if None
+                            placeholders are created instead
         """
         if self.rnn_created:
             logging.fatal("Trying to create the acoustic RNN but it is already.")
@@ -172,28 +166,31 @@ class AcousticModel(object):
         self.input_keep_prob = input_keep_prob
         self.output_keep_prob = output_keep_prob
 
-        if iterator is not None:
-            mfcc_batch, input_seq_lengths, label_batch = iterator.get_next()
-            # Transpose mfcc_batch in order to get time serie as first dimension
+        if use_iterator is True:
+            mfcc_batch, input_lengths, label_batch = self.iterator_get_next_op
+            # Pad if the batch is not complete
+            padded_mfcc_batch = tf.pad(mfcc_batch, [[0, self.batch_size - tf.size(input_lengths)], [0, 0], [0, 0]])
+            # Transpose padded_mfcc_batch in order to get time serie as first dimension
             # [batch_size, time_serie, input_dim] ====> [time_serie, batch_size, input_dim]
-            inputs = tf.transpose(mfcc_batch, perm=[1, 0, 2])
-            # Label tensor must be provided as a sparse tensor.
-            sparse_labels = tf.SparseTensor(label_batch[0], label_batch[1], label_batch[2])
-        else:
-            if with_input_queue:
-                # Create a queue
-                inputs, input_seq_lengths, label_batch, _ = self._create_input_queue()
-            else:
-                # Set placeholders for input
-                self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
-                                                name="inputs_ph")
+            inputs = tf.transpose(padded_mfcc_batch, perm=[1, 0, 2])
+            # Pad input_seq_lengths if the batch is not complete
+            input_seq_lengths = tf.pad(input_lengths, [[0, self.batch_size - tf.size(input_lengths)]])
 
-                self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
-                self.labels_ph = tf.placeholder(tf.uint8, shape=[None, self.max_target_seq_length],
-                                                name="labels_ph")
-                inputs = self.inputs_ph
-                input_seq_lengths = self.input_seq_lengths_ph
-                label_batch = self.labels_ph
+            # Label tensor must be provided as a sparse tensor.
+            sparse_labels = tf.SparseTensor(label_batch[0], label_batch[1], [self.batch_size, label_batch[2][1]])
+            # Pad sparse_labels if the batch is not complete
+            sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, len(self.char_map) - 1)
+        else:
+            # Set placeholders for input
+            self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
+                                            name="inputs_ph")
+
+            self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
+            self.labels_ph = tf.placeholder(tf.uint8, shape=[None, self.max_target_seq_length],
+                                            name="labels_ph")
+            inputs = self.inputs_ph
+            input_seq_lengths = self.input_seq_lengths_ph
+            label_batch = self.labels_ph
 
             # Label tensor must be provided as a sparse tensor.
             # First get indexes from non-zero positions
@@ -211,37 +208,6 @@ class AcousticModel(object):
 
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
-
-    def _create_input_queue(self):
-        # Create the input queue
-        self.queue_capacity = self.batch_size * 2
-        with tf.container("PaddingFIFOQueue"):
-            self.queue = tf.PaddingFIFOQueue(self.queue_capacity, [tf.float32, tf.int32, tf.int32, tf.bool],
-                                             [[None, self.input_dim], [], [None], [1]])
-
-        # Define the enqueue and dequeue operations
-        self.queue_input_ph = tf.placeholder(tf.float32, shape=[None, self.input_dim], name="queue_mfcc_input")
-        self.queue_input_length_ph = tf.placeholder(tf.int32, shape=[], name="queue_mfcc_input_length")
-        self.queue_label_ph = tf.placeholder(tf.int32, shape=[None], name="queue_label")
-        self.queue_end_signal_ph = tf.placeholder(tf.bool, shape=[1], name="queue_end_signal_ph")
-        self.enqueue_op = self.queue.enqueue([self.queue_input_ph, self.queue_input_length_ph,
-                                              self.queue_label_ph, self.queue_end_signal_ph])
-        dequeue_op = self.queue.dequeue_many(self.batch_size)
-
-        # Get data from the queue
-        mfcc_batch, mfcc_lengths_batch, label_batch, end_signal_batch = dequeue_op
-
-        # Define an op to throw an error if the end is reached
-        # If at least one file in the batch has an end_signal to True then the batch is incomplete
-        assert_op = tf.assert_equal(end_signal_batch, [[False]] * self.batch_size)
-        # Depend the assertion on an op that will be needed (to insure that the assert will be run)
-        with tf.control_dependencies([assert_op]):
-            # Object variables used as inputs for the RNN
-            # Transpose mfcc_batch in order to get time serie as first dimension
-            # [batch_size, time_serie, input_dim] ====> [time_serie, batch_size, input_dim]
-            inputs = tf.transpose(mfcc_batch, perm=[1, 0, 2])
-
-        return inputs, mfcc_lengths_batch, label_batch, end_signal_batch
 
     def _build_base_rnn(self, inputs, input_seq_lengths, forward_only=True):
         """
@@ -411,7 +377,7 @@ class AcousticModel(object):
 
         # Compute the CTC loss between the logits and the truth for each item of the batch
         with tf.name_scope('CTC'):
-            ctc_loss = tf.nn.ctc_loss(sparse_labels, logits, input_seq_lengths)
+            ctc_loss = tf.nn.ctc_loss(sparse_labels, logits, input_seq_lengths, ignore_longer_outputs_than_inputs=True)
 
             # Compute the mean loss of the batch (only used to check on progression in learning)
             # The loss is averaged accross the batch but before we take into account the real size of the label
@@ -526,6 +492,10 @@ class AcousticModel(object):
 
     def set_learning_rate(self, sess, learning_rate):
         assign_op = self.learning_rate_var.assign(learning_rate)
+        sess.run(assign_op)
+
+    def set_is_training(self, sess, is_training):
+        assign_op = self.is_training_var.assign(is_training)
         sess.run(assign_op)
 
     @staticmethod
@@ -799,6 +769,7 @@ class AcousticModel(object):
     def start_batch(self, session, is_training, run_options=None, run_metadata=None):
         output = [self.acc_error_rate_zero_op, self.acc_mean_loss_zero_op, self.mini_batch_zero_op]
 
+        self.set_is_training(session, is_training)
         if is_training:
             output.append(self.acc_gradients_zero_op)
 
@@ -912,14 +883,8 @@ class AcousticModel(object):
         cer = (sum(cer_list) * 100) / float(len(cer_list))
         return wer, cer
 
-    def evaluate_basic(self, sess, eval_dataset, input_seq_length, signal_processing,
-                       run_options=None, run_metadata=None):
+    def run_evaluation(self, sess, run_options=None, run_metadata=None):
         start_time = time.time()
-        # Create a thread to load data
-        _ = self.enqueue_data(sess, input_seq_length, signal_processing, eval_dataset, run_forever=False,
-                              run_options=run_options, run_metadata=run_metadata)
-
-        # Main evaluation loop
         logging.info("Start evaluating...")
 
         # Start a new batch
@@ -928,8 +893,8 @@ class AcousticModel(object):
         try:
             while True:
                 self.run_step(sess, False, run_options=run_options, run_metadata=run_metadata)
-        except tf.errors.InvalidArgumentError:
-            logging.debug("Queue empty, exiting evaluation step")
+        except tf.errors.OutOfRangeError:
+            logging.debug("Dataset empty, exiting evaluation step")
 
         # Close the batch (always reset the RNN state after each batch in evaluation mode)
         mean_loss, mean_error_rate, current_step = self.end_batch(sess, False, run_options=run_options,
@@ -938,103 +903,88 @@ class AcousticModel(object):
         logging.info("Evaluation at step %d : loss %.5f - error_rate %.5f - duration %.2f",
                      current_step, mean_loss, mean_error_rate, time.time() - start_time)
 
-        # Empty the queue
-        self.empty_queue(sess)
-
         return mean_loss, mean_error_rate, current_step
 
-    def enqueue_data(self, sess, input_seq_length, signal_processing, dataset,
-                     run_forever=False, run_options=None, run_metadata=None):
-        # Create a coordinator for the queue if there isn't or reset the existing one
-        if self.coord is None:
-            self.coord = tf.train.Coordinator()
-        else:
-            self.coord.clear_stop()
+    def build_dataset(self, input_set, batch_size, max_input_seq_length, max_target_seq_length, signal_processing):
+        # Separate each data from the input list
+        audio_streams = [item[0] for item in input_set]
+        labels = [item[1] for item in input_set]
+        audio_lengths = [item[2] for item in input_set]
 
-        # Build a thread to process input data into the queue
-        thread_local_data = threading.local()
-        thread = threading.Thread(name="thread_enqueue", target=self._enqueue_data_thread,
-                                  args=(self.coord, sess, input_seq_length, signal_processing, thread_local_data,
-                                        dataset, run_forever, run_options, run_metadata))
-        thread.start()
-        return thread
+        audio_dataset = tf.contrib.data.Dataset.from_tensor_slices(audio_streams)
+        label_dataset = tf.contrib.data.Dataset.from_tensor_slices(labels)
+        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.int32))
 
-    def _enqueue_data_thread(self, coord, sess, input_seq_length, signal_processing, t_local_data,
-                             dataset, run_forever=False, run_options=None, run_metadata=None):
-        # Make a local copy of the dataset
-        t_local_data.dataset = dataset[:]
-        t_local_data.current_pos = 0
+        # Read audio data and convert string labels
+        def _read_audio(filename):
+            # Need to convert back to string because tf.py_func changed it to a numpy array
+            filename = str(filename, encoding='UTF-8')
+            logging.debug("Reading file : %s", filename)
+            audio_processor = audioprocessor.AudioProcessor(max_input_seq_length, signal_processing)
+            audio_decoded, _ = audio_processor.process_audio_file(filename)
+            return np.array(audio_decoded, dtype=np.float32)
 
-        # Create an audio_processor to be used by the thread
-        audio_processor = audioprocessor.AudioProcessor(input_seq_length, signal_processing)
+        def _convert_audio_length(duration):
+            length = audioprocessor.AudioProcessor.get_mfcc_length_from_duration(duration)
+            return np.array(length, dtype=np.int32)
 
-        while not coord.should_stop():
-            # Start over if end is reached
-            if t_local_data.current_pos >= len(t_local_data.dataset):
-                if run_forever:
-                    logging.debug("An epoch have been reached, starting a new one")
-                    t_local_data.current_pos = 0
-                else:
-                    logging.debug("An epoch have been reached, sending end signal")
-                    # Sending a full batch of end signal items in the queue to detect ending
-                    # A full batch is needed to be sure that the dequeue op can be made
-                    for i in range(self.batch_size):
-                        sess.run(self.enqueue_op, feed_dict={self.queue_input_ph: np.zeros([1, self.input_dim]),
-                                                             self.queue_input_length_ph: 0,
-                                                             self.queue_label_ph: [0],
-                                                             self.queue_end_signal_ph: [True]},
-                                 options=run_options, run_metadata=run_metadata)
-                    break
+        def _transcode_label(label):
+            # Need to convert back to string because tf.py_func changed it to a numpy array
+            label = str(label, encoding='UTF-8')
+            label_transcoded = self.get_str_labels(label)
+            return np.array(label_transcoded, dtype=np.int32)
 
-            # Take an item in the list and update position
-            [t_local_data.file, t_local_data.text, _] = t_local_data.dataset[t_local_data.current_pos]
-            t_local_data.current_pos += 1
+        audio_dataset = audio_dataset.map(lambda filename: tf.py_func(_read_audio, [filename], tf.float32),
+                                          num_threads=2, output_buffer_size=30)
+        label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
+                                          num_threads=2, output_buffer_size=30)
+        audio_length_dataset = audio_length_dataset.map(
+            lambda duration: tf.py_func(_convert_audio_length, [duration], tf.int32),
+            num_threads=2, output_buffer_size=30)
 
-            # Calculate MFCC
-            t_local_data.mfcc_data, t_local_data.original_mfcc_length =\
-                audio_processor.process_audio_file(t_local_data.file)
-            logging.debug("File %s processed, resulting a array of shape %s - original signal size is %d",
-                          t_local_data.file, t_local_data.mfcc_data.shape, t_local_data.original_mfcc_length)
+        # Batch the datasets
+        audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=[None, None])
+        label_dataset = label_dataset.dense_to_sparse_batch(batch_size=batch_size, row_shape=[max_target_seq_length])
+        audio_length_dataset = audio_length_dataset.batch(batch_size)
 
-            # Convert string to numbers
-            t_local_data.label_data = self.get_str_labels(t_local_data.text)
-            if len(t_local_data.label_data) == 0:
-                # Incorrect label
-                logging.warning("Incorrect label for %s (%s)", t_local_data.file, t_local_data.text)
-                continue
-            # Check sizes and pad if needed
-            t_local_data.label_data_length = len(t_local_data.label_data)
-            if (t_local_data.label_data_length > self.max_target_seq_length) or\
-               (t_local_data.original_mfcc_length > self.max_input_seq_length):
-                # Either input or output vector is too long
-                logging.warning("Warning - sample too long : %s (input : %d / text : %s)",
-                                t_local_data.file, t_local_data.original_mfcc_length, t_local_data.label_data_length)
-                continue
-            elif t_local_data.label_data_length < self.max_target_seq_length:
-                # Label need padding
-                t_local_data.label_data += [0] * (self.max_target_seq_length - len(t_local_data.label_data))
+        # And zip them together
+        dataset = tf.contrib.data.Dataset.zip((audio_dataset, audio_length_dataset, label_dataset))
 
-            try:
-                sess.run(self.enqueue_op, feed_dict={self.queue_input_ph: t_local_data.mfcc_data,
-                                                     self.queue_input_length_ph: t_local_data.original_mfcc_length,
-                                                     self.queue_label_ph: t_local_data.label_data,
-                                                     self.queue_end_signal_ph: [False]},
-                         options=run_options, run_metadata=run_metadata)
-            except tf.errors.CancelledError:
-                # The queue have been cancelled so we should stop
-                logging.debug("Queue has been closed, exiting input thread")
-                break
+        # TODO : add a filter for files which are too long (currently de-structuring with Dataset.filter is not
+        #        supported in python3)
 
-    def empty_queue(self, sess):
-        run_options = tf.RunOptions()
-        run_options.timeout_in_ms = 1000
+        return dataset
 
-        try:
-            sess.run(self.queue.dequeue_up_to(self.queue_capacity * 2), options=run_options)
-        except tf.errors.InvalidArgumentError:
-            pass
-        except tf.errors.DeadlineExceededError:
-            pass
+    def add_dataset_input(self, dataset):
+        """
+        Add one dataset as an input to the model
+
+        Parameters
+        ----------
+        :param dataset: a tensorflow Dataset
+        :return iterator: tensorflow Iterator for the dataset
+        """
+        iterator = tf.contrib.data.Iterator.from_dataset(dataset)
+        self.iterator_get_next_op = iterator.get_next()
+        return iterator
+
+    def add_datasets_input(self, train_dataset, valid_dataset):
+        """
+        Add training and evaluation datasets for input to the model
+        Warning : returned iterators must be initialized before use : "tf.Session.run(iterator.initializer)" on each
+
+        Parameters
+        ----------
+        :param train_dataset: a tensorflow Dataset
+        :param valid_dataset: a tensorflow Dataset
+        :return t_iterator: tensorflow Iterator for the train dataset
+        :return v_iterator: tensorflow Iterator for the valid dataset
+        """
+        t_iterator = tf.contrib.data.Iterator.from_dataset(train_dataset)
+        v_iterator = tf.contrib.data.Iterator.from_dataset(valid_dataset)
+        self.iterator_get_next_op = tf.cond(self.is_training_var, lambda: t_iterator.get_next(),
+                                            lambda: v_iterator.get_next())
+        return t_iterator, v_iterator
 
     def _write_timeline(self, run_metadata, inter_time, action=""):
         logging.debug("--- Action %s duration : %.4f", action, time.time() - inter_time)
@@ -1066,10 +1016,10 @@ class AcousticModel(object):
         :returns float mean_loss: mean loss for the train batch run
         :returns float mean_error_rate: mean error rate for the train batch run
         :returns int current_step: new value of the step counter at the end of this batch
-        :returns bool queueing_finished: `True` if the queue was emptied during the batch
+        :returns bool dataset_empty: `True` if the dataset was emptied during the batch
         """
         start_time = inter_time = time.time()
-        queueing_finished = False
+        dataset_empty = False
 
         # Start a new batch
         self.start_batch(sess, True, run_options=run_options, run_metadata=run_metadata)
@@ -1084,9 +1034,9 @@ class AcousticModel(object):
                 mini_batch_num = self.run_step(sess, True, run_options=run_options, run_metadata=run_metadata)
                 if self.timeline_enabled:
                     inter_time = self._write_timeline(run_metadata, inter_time, "step-" + str(i))
-        except tf.errors.InvalidArgumentError:
-            logging.debug("Queue empty, exiting train step")
-            queueing_finished = True
+        except tf.errors.OutOfRangeError:
+            logging.debug("Dataset empty, exiting train step")
+            dataset_empty = True
 
         # Close the batch if at least a mini-batch was completed
         if mini_batch_num > 0:
@@ -1100,61 +1050,6 @@ class AcousticModel(object):
             logging.info("Batch %d : loss %.5f - error_rate %.5f - duration %.2f",
                          current_step, mean_loss, mean_error_rate, time.time() - start_time)
 
-            return mean_loss, mean_error_rate, current_step, queueing_finished
+            return mean_loss, mean_error_rate, current_step, dataset_empty
         else:
-            return 0.0, 0.0, self.global_step.eval(), queueing_finished
-
-    def fit(self, sess, input_seq_length, signal_processing, train_set, mini_batch_size, rnn_state_reset_ratio=1.0,
-            max_steps=None, run_options=None, run_metadata=None):
-        """
-        Fit the model to the given train_set.
-        
-        The fitting process will proceed until the end of the train_set or max_steps is reached
-        
-        Parameters
-        ----------
-        :param sess: a tensorflow session
-        :param input_seq_length: maximum length of the input sequence of the RNN
-        :param signal_processing: signal processing feature type to extract
-        :param train_set: the train_set to fit
-        :param mini_batch_size: the number of batchs to run before applying the gradients
-        :param rnn_state_reset_ratio: the ratio to which the RNN internal state will be reset to 0
-             default: 1.0 mean the RNN internal state will be reset at the end of each batch
-             example: 0.25 mean there is 25% chances that the RNN internal state will be reset at the end of each batch
-        :param max_steps: max number of steps to run
-        :param run_options: options parameter for the sess.run calls
-        :param run_metadata: run_metadata parameter for the sess.run calls
-        :return total_steps: total training steps done by the model
-        :return local_steps: total training steps done during this fit session
-        """
-        # Create a thread to load data
-        thread = self.enqueue_data(sess, input_seq_length, signal_processing, train_set, run_forever=False,
-                                   run_options=run_options, run_metadata=run_metadata)
-
-        # Main training loop
-        logging.info("Start fit with %d files", len(train_set))
-        queueing_finished = False
-        total_steps = local_steps = 0
-        while not queueing_finished:
-            if self.coord.should_stop():
-                break
-
-            _, _, total_steps, queueing_finished =\
-                self.run_train_step(sess, mini_batch_size, rnn_state_reset_ratio,
-                                    run_options=run_options, run_metadata=run_metadata)
-            local_steps += 1
-
-            if (max_steps is not None) and (local_steps >= max_steps):
-                # Maximum allowed reached, exiting the training process
-                logging.debug("Max steps reached, exiting.")
-                break
-
-        # Ask the threads to stop.
-        logging.debug("Asking for threads to stop")
-        self.coord.request_stop()
-        # Empty the queue
-        self.empty_queue(sess)
-        # And wait for them to actually stop
-        self.coord.join([thread], stop_grace_period_secs=10)
-
-        return total_steps, local_steps
+            return 0.0, 0.0, self.global_step.eval(), dataset_empty
