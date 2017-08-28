@@ -913,7 +913,7 @@ class AcousticModel(object):
 
         audio_dataset = tf.contrib.data.Dataset.from_tensor_slices(audio_streams)
         label_dataset = tf.contrib.data.Dataset.from_tensor_slices(labels)
-        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.int32))
+        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.float32))
 
         # Read audio data and convert string labels
         def _read_audio(filename):
@@ -926,12 +926,14 @@ class AcousticModel(object):
 
         def _convert_audio_length(duration):
             length = audioprocessor.AudioProcessor.get_mfcc_length_from_duration(duration)
+            logging.debug("Returning mfcc_length of : %d", length)
             return np.array(length, dtype=np.int32)
 
         def _transcode_label(label):
             # Need to convert back to string because tf.py_func changed it to a numpy array
             label = str(label, encoding='UTF-8')
             label_transcoded = self.get_str_labels(label)
+            logging.debug("Returning label as : %s", label_transcoded)
             return np.array(label_transcoded, dtype=np.int32)
 
         audio_dataset = audio_dataset.map(lambda filename: tf.py_func(_read_audio, [filename], tf.float32),
