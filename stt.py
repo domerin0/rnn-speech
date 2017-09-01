@@ -168,6 +168,7 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
             previous_mean_error_rates.append(mean_error_rate)
             if len(previous_mean_error_rates) >= 7:
                 sess.run(model.learning_rate_decay_op)
+                previous_mean_error_rates.clear()
                 logging.info("Model is not improving, decaying the learning rate")
                 if model.learning_rate_var.eval() < 1e-7:
                     logging.info("Learning rate is too low, exiting")
