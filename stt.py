@@ -46,7 +46,7 @@ def build_training_rnn(sess, hyper_params, prog_params, train_set, test_set):
     train_dataset = model.build_dataset(train_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
                                         hyper_params["max_target_seq_length"], hyper_params["signal_processing"])
 
-    t_iterator = v_iterator = None
+    v_iterator = None
     if test_set is []:
         t_iterator = model.add_dataset_input(train_dataset)
         sess.run(t_iterator.initializer)
@@ -66,6 +66,11 @@ def build_training_rnn(sess, hyper_params, prog_params, train_set, test_set):
     model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
     model.initialize(sess)
     model.restore(sess, hyper_params["checkpoint_dir"])
+
+    # Override the learning rate if given on the command line
+    if prog_params["learn_rate"] is not None:
+        model.set_learning_rate(sess, prog_params["learn_rate"])
+
     return model, t_iterator, v_iterator
 
 
@@ -141,9 +146,9 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
                             logging.info("Shuffling the training dataset")
                             shuffle(train_set)
                             train_dataset = model.build_dataset(train_set, hyper_params["batch_size"],
-                                                            hyper_params["max_input_seq_length"],
-                                                            hyper_params["max_target_seq_length"],
-                                                            hyper_params["signal_processing"])
+                                                                hyper_params["max_input_seq_length"],
+                                                                hyper_params["max_target_seq_length"],
+                                                                hyper_params["signal_processing"])
                             sess.run(t_iterator.make_initializer(train_dataset))
                         else:
                             logging.info("Reuse the same training dataset")
