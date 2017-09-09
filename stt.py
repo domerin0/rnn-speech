@@ -130,10 +130,13 @@ def train_rnn(train_set, test_set, hyper_params, prog_params):
         current_step = epoch = 0
         while True:
             # Launch training
+            mean_error_rate = 0
             for _ in range(hyper_params["steps_per_checkpoint"]):
-                mean_loss, mean_error_rate, current_step, dataset_empty =\
+                _step_mean_loss, step_mean_error_rate, current_step, dataset_empty =\
                     model.run_train_step(sess, hyper_params["mini_batch_size"], hyper_params["rnn_state_reset_ratio"],
                                          run_options=run_options, run_metadata=run_metadata)
+                mean_error_rate += step_mean_error_rate / hyper_params["steps_per_checkpoint"]
+
                 if dataset_empty is True:
                     epoch += 1
                     logging.info("End of epoch number : %d", epoch)
@@ -280,8 +283,6 @@ def parse_args():
                         help='Path to configuration file with hyper-parameters.')
     parser.add_argument('--tb_name', type=str, default=None,
                         help='Tensorboard path name for the run (allow multiples run with the same output path)')
-    parser.add_argument('--start_from', type=int, default=0,
-                        help='Position in the train set to start training from (default : 0)')
     parser.add_argument('--max_epoch', type=int, default=None,
                         help='Max epoch to train (no limitation if not provided)')
     parser.add_argument('--learn_rate', type=float, default=None,
@@ -304,10 +305,9 @@ def parse_args():
     group.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate WER against the test_set')
 
     args = parser.parse_args()
-    prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'start_from': args.start_from,
-                   'max_epoch': args.max_epoch, 'learn_rate': args.learn_rate, 'timeline': args.timeline,
-                   'train': args.train, 'file': args.file, 'record': args.record, 'evaluate': args.evaluate,
-                   'XLA': args.XLA}
+    prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'max_epoch': args.max_epoch,
+                   'learn_rate': args.learn_rate, 'timeline': args.timeline, 'train': args.train, 'file': args.file,
+                   'record': args.record, 'evaluate': args.evaluate, 'XLA': args.XLA}
     return prog_params
 
 
