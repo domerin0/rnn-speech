@@ -3,6 +3,7 @@ import unittest
 import os
 import shutil
 import util.dataprocessor as dataprocessor
+from models.SpeechRecognizer import ENGLISH_CHAR_MAP
 
 
 class TestDataProcessor(unittest.TestCase):
@@ -126,6 +127,20 @@ class TestDataProcessor(unittest.TestCase):
                                 "Vystadial_2013/data_voip_en/dev/jurcic-028-121024_234433_0013625_0013836.wav",
                                 "alright thank you and goodbye", None]
                                ])
+
+    def test_get_str_labels_and_reverse(self):
+        text = "What ! I'm not looking for... I'll do it..."
+        cleaned_str = dataprocessor.DataProcessor.clean_label(text)
+        numeric_label = dataprocessor.DataProcessor.get_str_labels(ENGLISH_CHAR_MAP, cleaned_str)
+        new_text = dataprocessor.DataProcessor.get_labels_str(ENGLISH_CHAR_MAP, numeric_label)
+        self.assertEqual(new_text, cleaned_str)
+
+    def test_3_chars_token_in_str_end(self):
+        text = "it'll"
+        cleaned_str = dataprocessor.DataProcessor.clean_label(text)
+        numeric_label = dataprocessor.DataProcessor.get_str_labels(ENGLISH_CHAR_MAP, cleaned_str)
+        self.assertEqual(numeric_label, [60, 45, 1, 79])
+
 
 if __name__ == '__main__':
     unittest.main()

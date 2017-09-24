@@ -22,28 +22,12 @@ from datetime import datetime
 import logging
 from random import randint
 import util.audioprocessor as audioprocessor
-
-ENGLISH_CHAR_MAP = [
-                    # Apostrophes with one or two letters
-                    "'d", "'ll", "'m", "'nt", "'s", "s'", "'t", "'ve",
-                    # Double letters first
-                    'bb', 'cc', 'dd', 'ee', 'ff', 'gg', 'ii', 'kk', 'll', 'mm', 'nn',
-                    'oo', 'pp', 'rr', 'ss', 'tt', 'uu', 'zz',
-                    # Alphabet normal and capital
-                    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-                    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-                    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-                    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-                    # Apostrophe only for specific cases (eg. : O'clock)
-                    "'",
-                    # "end of sentence" character for CTC algorithm
-                    '_'
-                    ]
+import util.dataprocessor as dataprocessor
 
 
 class AcousticModel(object):
     def __init__(self, num_layers, hidden_size, batch_size, max_input_seq_length,
-                 max_target_seq_length, input_dim, normalization, language='english'):
+                 max_target_seq_length, input_dim, normalization, num_labels):
         """
         Initialize the acoustic rnn model parameters
 
@@ -56,7 +40,7 @@ class AcousticModel(object):
         :param max_target_seq_length: maximum length of ouput vector sequence
         :param input_dim: dimension of input vector
         :param normalization: boolean indicating whether or not to normalize data in a input batch
-        :param language: the language of the speech
+        :param num_labels: the numbers of output labels
         """
         # Store model's parameters
         self.num_layers = num_layers
@@ -66,16 +50,7 @@ class AcousticModel(object):
         self.max_target_seq_length = max_target_seq_length
         self.input_dim = input_dim
         self.normalization = normalization
-
-        # Set language
-        if language == 'english':
-            self.char_map = ENGLISH_CHAR_MAP
-            self.num_labels = len(self.char_map)
-        else:
-            raise ValueError("Invalid parameter 'language' for method '__init__'")
-
-        # Initialize queues coordinator
-        self.coord = None
+        self.num_labels = num_labels
 
         # Create object's variables for tensorflow ops
         self.rnn_state_zero_op = None
@@ -179,14 +154,14 @@ class AcousticModel(object):
             # Label tensor must be provided as a sparse tensor.
             sparse_labels = tf.SparseTensor(label_batch[0], label_batch[1], [self.batch_size, label_batch[2][1]])
             # Pad sparse_labels if the batch is not complete
-            sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, len(self.char_map) - 1)
+            sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, self.num_labels - 1)
         else:
             # Set placeholders for input
             self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
                                             name="inputs_ph")
 
             self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
-            self.labels_ph = tf.placeholder(tf.uint8, shape=[None, self.max_target_seq_length],
+            self.labels_ph = tf.placeholder(tf.int32, shape=[None, self.max_target_seq_length],
                                             name="labels_ph")
             inputs = self.inputs_ph
             input_seq_lengths = self.input_seq_lengths_ph
@@ -549,90 +524,6 @@ class AcousticModel(object):
         saver_op = tf.train.Saver(save_list)
         return saver_op
 
-    def get_str_labels(self, _str):
-        """
-        Convert a string into a label vector for the model
-        The char map follow recommendations from : https://arxiv.org/pdf/1609.05935v2.pdf
-
-        Parameters
-        ----------
-        _str : the string to convert into a label
-
-        Returns
-        -------
-        vector of int
-        """
-        # add eos char
-        _str += self.char_map[-1]
-        # Remove spaces and set each word start with a capital letter
-        next_is_upper = True
-        result = []
-        for i in range(len(_str)):
-            if _str[i] is ' ':
-                next_is_upper = True
-            else:
-                if next_is_upper:
-                    result.append(_str[i].upper())
-                    next_is_upper = False
-                else:
-                    result.append(_str[i])
-        _str = "".join(result)
-        # Convert to self.char_map indexes
-        result = []
-        i = 0
-        while i < len(_str):
-            if len(_str) - i >= 3:
-                try:
-                    result.append(self.char_map.index(_str[i:i+3]))
-                    i += 3
-                    continue
-                except ValueError:
-                    pass
-            if len(_str) - i >= 2:
-                try:
-                    result.append(self.char_map.index(_str[i:i+2]))
-                    i += 2
-                    continue
-                except ValueError:
-                    pass
-            try:
-                result.append(self.char_map.index(_str[i:i+1]))
-                i += 1
-                continue
-            except ValueError:
-                logging.warning("Unable to process label : %s", _str)
-                # Add the EOS char and return what was processed
-                result.append(len(self.char_map) - 1)
-                return result
-        return result
-
-    def get_labels_str(self, label):
-        """
-        Convert a vector issued from the model into a readable string
-
-        Parameters
-        ----------
-        label : a vector of int containing the predicted label
-
-        Returns
-        -------
-        string
-        """
-        # Convert int to values in self.char_map
-        char_list = [self.char_map[index] for index in label if 0 <= index < len(self.char_map)]
-        # Remove eos character if present
-        try:
-            char_list.remove(self.char_map[-1])
-        except ValueError:
-            pass
-        # Add spaces in front of capitalized letters (except the first one) and lower every letter
-        result = []
-        for i in range(len(char_list)):
-            if (i != 0) and (char_list[i].isupper()):
-                result.append(" ")
-            result.append(char_list[i].lower())
-        return "".join(result)
-
     @staticmethod
     def calculate_wer(first_string, second_string):
         """
@@ -822,11 +713,10 @@ class AcousticModel(object):
 
         output_feed = [self.prediction]
         outputs = session.run(output_feed, input_feed, options=run_options, run_metadata=run_metadata)
-        predictions = session.run(tf.sparse_tensor_to_dense(outputs[0], default_value=len(self.char_map),
+        predictions = session.run(tf.sparse_tensor_to_dense(outputs[0], default_value=self.num_labels,
                                                             validate_indices=True),
                                   options=run_options, run_metadata=run_metadata)
-        transcribed_text = [self.get_labels_str(prediction) for prediction in predictions]
-        return transcribed_text
+        return predictions
 
     def evaluate_full(self, sess, eval_dataset, input_seq_length, signal_processing,
                       run_options=None, run_metadata=None):
@@ -905,7 +795,9 @@ class AcousticModel(object):
 
         return mean_loss, mean_error_rate, current_step
 
-    def build_dataset(self, input_set, batch_size, max_input_seq_length, max_target_seq_length, signal_processing):
+    @staticmethod
+    def build_dataset(input_set, batch_size, max_input_seq_length, max_target_seq_length,
+                      signal_processing, char_map):
         # Separate each data from the input list
         audio_streams = [item[0] for item in input_set]
         labels = [item[1] for item in input_set]
@@ -932,7 +824,7 @@ class AcousticModel(object):
         def _transcode_label(label):
             # Need to convert back to string because tf.py_func changed it to a numpy array
             label = str(label, encoding='UTF-8')
-            label_transcoded = self.get_str_labels(label)
+            label_transcoded = dataprocessor.DataProcessor.get_str_labels(char_map, label)
             logging.debug("Returning label as : %s", label_transcoded)
             return np.array(label_transcoded, dtype=np.int32)
 

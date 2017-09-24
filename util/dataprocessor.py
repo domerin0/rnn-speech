@@ -65,10 +65,6 @@ class DataProcessor(object):
         # Filtering small files
         self.data = [item for item in self.data if item[2] > self.min_audio_size]
 
-    def get_ordered_dataset(self):
-        ordered_dataset = sorted(self.data, key=lambda x: x[2])
-        return ordered_dataset
-
     def get_dataset(self):
         return self.data
 
@@ -96,6 +92,94 @@ class DataProcessor(object):
         _str = _str.replace("_", " ")
         _str = _str.replace("  ", " ")
         return _str
+
+    @staticmethod
+    def get_str_labels(char_map, _str):
+        """
+        Convert a string into a label vector for the model
+        The char map follow recommendations from : https://arxiv.org/pdf/1609.05935v2.pdf
+
+        Parameters
+        ----------
+        :param char_map : the char_map against which to transcode the string
+        :param _str : the string to convert into a label
+
+        Returns
+        -------
+        :return a vector of int
+        """
+        # add eos char
+        _str += char_map[-1]
+        # Remove spaces and set each word start with a capital letter
+        next_is_upper = True
+        result = []
+        for i in range(len(_str)):
+            if _str[i] is ' ':
+                next_is_upper = True
+            else:
+                if next_is_upper:
+                    result.append(_str[i].upper())
+                    next_is_upper = False
+                else:
+                    result.append(_str[i])
+        _str = "".join(result)
+        # Convert to self.char_map indexes
+        result = []
+        i = 0
+        while i < len(_str):
+            if len(_str) - i >= 3:
+                try:
+                    result.append(char_map.index(_str[i:i+3]))
+                    i += 3
+                    continue
+                except ValueError:
+                    pass
+            if len(_str) - i >= 2:
+                try:
+                    result.append(char_map.index(_str[i:i+2]))
+                    i += 2
+                    continue
+                except ValueError:
+                    pass
+            try:
+                result.append(char_map.index(_str[i:i+1]))
+                i += 1
+                continue
+            except ValueError:
+                logging.warning("Unable to process label : %s", _str)
+                # Add the EOS char and return what was processed
+                result.append(len(char_map) - 1)
+                return result
+        return result
+
+    @staticmethod
+    def get_labels_str(char_map, label):
+        """
+        Convert a vector issued from the model into a readable string
+
+        Parameters
+        ----------
+        :param char_map : the char_map against which to transcode the vector
+        :param label : a vector of int containing the predicted label
+
+        Returns
+        -------
+        :return string : the resulting string
+        """
+        # Convert int to values in self.char_map
+        char_list = [char_map[index] for index in label if 0 <= index < len(char_map)]
+        # Remove eos character if present
+        try:
+            char_list.remove(char_map[-1])
+        except ValueError:
+            pass
+        # Add spaces in front of capitalized letters (except the first one) and lower every letter
+        result = []
+        for i in range(len(char_list)):
+            if (i != 0) and (char_list[i].isupper()):
+                result.append(" ")
+            result.append(char_list[i].lower())
+        return "".join(result)
 
     @classmethod
     def get_type(cls, raw_data_path):
