@@ -703,7 +703,7 @@ class AcousticModel(object):
     def process_input(self, session, inputs, input_seq_lengths, run_options=None, run_metadata=None):
         """
         Returns:
-          Translated text
+          Output vector
         """
         input_feed = {self.inputs_ph: np.array(inputs), self.input_seq_lengths_ph: np.array(input_seq_lengths)}
 
@@ -718,7 +718,7 @@ class AcousticModel(object):
                                   options=run_options, run_metadata=run_metadata)
         return predictions
 
-    def evaluate_full(self, sess, eval_dataset, input_seq_length, signal_processing,
+    def evaluate_full(self, sess, eval_dataset, input_seq_length, signal_processing, char_map,
                       run_options=None, run_metadata=None):
         # Create an audio_processor
         audio_processor = audioprocessor.AudioProcessor(input_seq_length, signal_processing)
@@ -755,9 +755,10 @@ class AcousticModel(object):
                 # Run the batch
                 logging.debug("Running a batch")
                 input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-                transcribed_texts = self.process_input(sess, input_feat_vecs, input_feat_vec_lengths,
+                predictions = self.process_input(sess, input_feat_vecs, input_feat_vec_lengths,
                                                        run_options=run_options, run_metadata=run_metadata)
-                for index, transcribed_text in enumerate(transcribed_texts):
+                for index, prediction in enumerate(predictions):
+                    transcribed_text = dataprocessor.DataProcessor.get_labels_str(char_map, prediction)
                     true_label = labels[index]
                     if len(true_label) > 0:
                         nb_words = len(true_label.split())

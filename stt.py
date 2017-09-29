@@ -298,7 +298,7 @@ def evaluate(hyper_params):
         model.restore(sess, hyper_params["checkpoint_dir"] + "/acoustic/")
 
         wer, cer = model.evaluate_full(sess, test_set, hyper_params["max_input_seq_length"],
-                                       hyper_params["signal_processing"])
+                                       hyper_params["signal_processing"], hyper_params["char_map"])
         print("Resulting WER : {0:.3g} %".format(wer))
         print("Resulting CER : {0:.3g} %".format(cer))
         return
