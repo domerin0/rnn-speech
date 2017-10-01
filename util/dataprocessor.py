@@ -11,6 +11,7 @@ import configparser
 from multiprocessing import Pool
 import mutagen
 import time
+import numpy as np
 
 
 DEFAULT_MIN_TEXT_LENGTH = 3         # Default minimum number of chars in a label to be kept into a dataset
@@ -94,7 +95,30 @@ class DataProcessor(object):
         return _str
 
     @staticmethod
-    def get_str_labels(char_map, _str):
+    def get_str_to_one_hot_encoded(char_map, _str, add_eos=True):
+        """
+        Convert a string into an array of one-hot encoded vectors
+
+        Parameters
+        ----------
+        :param char_map : the char_map against which to transcode the string
+        :param _str : the string to convert into a label
+        :param add_eos : if true (default), add the "end of sentence" special character
+
+        Returns
+        -------
+        :return: an array of one-hot encoded vectors
+        """
+        integer_values = DataProcessor.get_str_labels(char_map, _str, add_eos=add_eos)
+        result = []
+        for integer in integer_values:
+            one_hot_vector = np.zeros(len(char_map))
+            one_hot_vector[integer] = 1
+            result.append(one_hot_vector)
+        return result
+
+    @staticmethod
+    def get_str_labels(char_map, _str, add_eos=True):
         """
         Convert a string into a label vector for the model
         The char map follow recommendations from : https://arxiv.org/pdf/1609.05935v2.pdf
@@ -103,13 +127,12 @@ class DataProcessor(object):
         ----------
         :param char_map : the char_map against which to transcode the string
         :param _str : the string to convert into a label
+        :param add_eos : if true (default), add the "end of sentence" special character
 
         Returns
         -------
-        :return a vector of int
+        :return: a vector of int
         """
-        # add eos char
-        _str += char_map[-1]
         # Remove spaces and set each word start with a capital letter
         next_is_upper = True
         result = []
@@ -129,14 +152,14 @@ class DataProcessor(object):
         while i < len(_str):
             if len(_str) - i >= 3:
                 try:
-                    result.append(char_map.index(_str[i:i+3]))
+                    result.append(char_map.index(_str[i:i+3].lower()))
                     i += 3
                     continue
                 except ValueError:
                     pass
             if len(_str) - i >= 2:
                 try:
-                    result.append(char_map.index(_str[i:i+2]))
+                    result.append(char_map.index(_str[i:i+2].lower()))
                     i += 2
                     continue
                 except ValueError:
@@ -147,9 +170,9 @@ class DataProcessor(object):
                 continue
             except ValueError:
                 logging.warning("Unable to process label : %s", _str)
-                # Add the EOS char and return what was processed
-                result.append(len(char_map) - 1)
-                return result
+                break
+        if add_eos:
+            result.append(len(char_map) - 1)
         return result
 
     @staticmethod

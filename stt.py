@@ -266,9 +266,21 @@ def generate_text(hyper_params):
         model.initialize(sess)
         model.restore(sess, hyper_params["checkpoint_dir"] + "/language/")
 
-        input_vec = np.ones([1, 1, hyper_params["char_map_length"]])
-        next_char = model.process_input(sess, input_vec, [1])
-        print(next_char)
+        # Start with a letter
+        text = "O"
+
+        for _ in range(10):
+            print(text, end="")
+            # Convert to an one-hot encoded vector
+            input_vec = dataprocessor.DataProcessor.get_str_to_one_hot_encoded(hyper_params["char_map"], text,
+                                                                               add_eos=False)
+            feat_vec = np.array(input_vec)
+            (a, b) = feat_vec.shape
+            feat_vec = feat_vec.reshape((a, 1, b))
+            prediction = model.process_input(sess, feat_vec, [1])
+            text = dataprocessor.DataProcessor.get_labels_str(hyper_params["char_map"], prediction[0])
+        print(text)
+        return
 
 
 def evaluate(hyper_params):
