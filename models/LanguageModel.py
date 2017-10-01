@@ -158,7 +158,7 @@ class LanguageModel(object):
                                             name="inputs_ph")
 
             self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
-            self.labels_ph = tf.placeholder(tf.uint8, shape=[None, self.max_target_seq_length],
+            self.labels_ph = tf.placeholder(tf.int32, shape=[None, self.max_target_seq_length],
                                             name="labels_ph")
             inputs = self.inputs_ph
             input_seq_lengths = self.input_seq_lengths_ph
