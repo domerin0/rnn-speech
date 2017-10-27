@@ -143,8 +143,8 @@ class AudioProcessor(object):
         # AI:
         # *** filter_banks = 20 * np.log10(filter_banks) ***
         # 'pow_frames' contains the power spectrum (i.e. squared magnitude)
-        # the proper formula to convert to logarithm scale in decibels is
-        # 10*log10(POW), while 20*log10(MAG) is used for un-squared magnitude
+        # the proper formula to convert to the logarithm scale in decibels is
+        # 10*log10(POW), while 20*log10(MAG) is used for the un-squared magnitude
         # this way both formuli result in the same outcome
         filter_banks = 10 * np.log10(filter_banks)
         
