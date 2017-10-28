@@ -111,7 +111,18 @@ class AudioProcessor(object):
         mag_frames = np.absolute(np.fft.rfft(frames, nfft))
         pow_frames = ((1.0 / nfft) * (mag_frames ** 2))
         low_freq_mel = 0
-        high_freq_mel = (2595 * np.log10(1 + (sr / 2) / 700))
+        
+        ### AI:
+        # the following line works correcty as-is in python3
+        # *** high_freq_mel = (2595 * np.log10(1 + (sr / 2) / 700)) ***
+        # however, in python it results in a smaller value of 'high_freq_mel'
+        # as the 'sr' variable is interpreted as integer
+        # it has minor impact on the performance of the natively trained and tested models
+        # however, if one uses python to test the models that were created in python3
+        # the models show the CER drop as much as 1% absolute
+        # the line below fixes that issue completely
+        high_freq_mel = (2595 * np.log10(1 + (float(sr) / 2) / 700))
+        
         mel_points = np.linspace(low_freq_mel, high_freq_mel, nfilt + 2)
         hz_points = (700 * (10**(mel_points / 2595) - 1))
         bin = np.floor((nfft + 1) * hz_points / sr)
@@ -128,7 +139,15 @@ class AudioProcessor(object):
                 fbank[m - 1, k] = (bin[m + 1] - k) / (bin[m + 1] - bin[m])
         filter_banks = np.dot(pow_frames, fbank.T)
         filter_banks = np.where(filter_banks == 0, np.finfo(float).eps, filter_banks)
-        filter_banks = 20 * np.log10(filter_banks)
+        
+        # AI:
+        # *** filter_banks = 20 * np.log10(filter_banks) ***
+        # 'pow_frames' contains the power spectrum (i.e. squared magnitude)
+        # the proper formula to convert to the logarithm scale in decibels is
+        # 10*log10(POW), while 20*log10(MAG) is used for the un-squared magnitude
+        # this way both formuli result in the same outcome
+        filter_banks = 10 * np.log10(filter_banks)
+        
         # Apply mean normalization
         filter_banks -= (np.mean(filter_banks, axis=0) + 1e-8)
         filter_banks = filter_banks.transpose()
