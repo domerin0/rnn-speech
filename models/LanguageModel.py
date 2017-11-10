@@ -139,12 +139,12 @@ class LanguageModel(object):
         self.output_keep_prob = output_keep_prob
 
         if use_iterator is True:
-            mfcc_batch, input_lengths, label_batch = self.iterator_get_next_op
+            text_batch, input_lengths, label_batch = self.iterator_get_next_op
             # Pad if the batch is not complete
-            padded_mfcc_batch = tf.pad(mfcc_batch, [[0, self.batch_size - tf.size(input_lengths)], [0, 0], [0, 0]])
-            # Transpose padded_mfcc_batch in order to get time serie as first dimension
+            padded_text_batch = tf.pad(text_batch, [[0, self.batch_size - tf.size(input_lengths)], [0, 0], [0, 0]])
+            # Transpose padded_text_batch in order to get time serie as first dimension
             # [batch_size, time_serie, input_dim] ====> [time_serie, batch_size, input_dim]
-            inputs = tf.transpose(padded_mfcc_batch, perm=[1, 0, 2])
+            inputs = tf.transpose(padded_text_batch, perm=[1, 0, 2])
             # Pad input_seq_lengths if the batch is not complete
             input_seq_lengths = tf.pad(input_lengths, [[0, self.batch_size - tf.size(input_lengths)]])
 
@@ -154,7 +154,7 @@ class LanguageModel(object):
             sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, self.num_labels - 1)
         else:
             # Set placeholders for input
-            self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
+            self.inputs_ph = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, None, self.input_dim],
                                             name="inputs_ph")
 
             self.input_seq_lengths_ph = tf.placeholder(tf.int32, shape=[None], name="input_seq_lengths_ph")
@@ -239,7 +239,7 @@ class LanguageModel(object):
                                   initializer=tf.constant_initializer(0.0))
 
         # Apply the input layer to the network input to produce the input for the rnn part of the network
-        rnn_inputs = [tf.matmul(tf.squeeze(i, axis=[0]), w_i) + b_i
+        rnn_inputs = [tf.matmul(tf.squeeze(tf.cast(i, tf.float32), axis=[0]), w_i) + b_i
                       for i in tf.split(axis=0, num_or_size_splits=self.max_input_seq_length, value=inputs)]
         # Switch from a list to a tensor
         rnn_inputs = tf.stack(rnn_inputs)
@@ -603,6 +603,7 @@ class LanguageModel(object):
 
     @staticmethod
     def build_dataset(input_set, batch_size, max_input_seq_length, char_map):
+        # TODO : fix size calculation
         length_set = [len(label) for label in input_set]
         input_dataset = tf.contrib.data.Dataset.from_tensor_slices(input_set)
         input_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(length_set)
@@ -611,8 +612,7 @@ class LanguageModel(object):
         def _transcode_label(label):
             # Need to convert back to string because tf.py_func changed it to a numpy array
             label = str(label, encoding='UTF-8')
-            label_transcoded = dataprocessor.DataProcessor.get_str_labels(char_map, label)
-            logging.debug("Returning label as : %s", label_transcoded)
+            label_transcoded = dataprocessor.DataProcessor.get_str_to_one_hot_encoded(char_map, label)
             return np.array(label_transcoded, dtype=np.int32)
 
         def _transcode_and_offset_label(label):
@@ -630,7 +630,7 @@ class LanguageModel(object):
                                           num_threads=2, output_buffer_size=30)
 
         # Batch the datasets
-        input_dataset = input_dataset.padded_batch(batch_size, padded_shapes=[None])
+        input_dataset = input_dataset.padded_batch(batch_size, padded_shapes=[None, None])
         label_dataset = label_dataset.dense_to_sparse_batch(batch_size=batch_size, row_shape=[max_input_seq_length])
         input_length_dataset = input_length_dataset.batch(batch_size)
 
