@@ -60,14 +60,16 @@ def build_language_training_rnn(sess, hyper_params, prog_params, train_set, test
                           hyper_params["char_map_length"])
 
     # Create a Dataset from the train_set and the test_set
-    train_dataset = model.build_dataset(train_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"])
+    train_dataset = model.build_dataset(train_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
+                                        hyper_params["char_map"])
 
     v_iterator = None
     if test_set is []:
         t_iterator = model.add_dataset_input(train_dataset)
         sess.run(t_iterator.initializer)
     else:
-        test_dataset = model.build_dataset(test_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"])
+        test_dataset = model.build_dataset(test_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
+                                           hyper_params["char_map"])
 
         # Build the input stream from the different datasets
         t_iterator, v_iterator = model.add_datasets_input(train_dataset, test_dataset)
@@ -160,7 +162,8 @@ def train_language_rnn(train_set, test_set, hyper_params, prog_params):
 
     with tf.Session(config=config) as sess:
         # Initialize the model
-        build_language_training_rnn(sess, hyper_params, prog_params, train_set, test_set)
+        model, t_iterator, v_iterator = build_language_training_rnn(sess, hyper_params, prog_params,
+                                                                    train_set, test_set)
 
     return
 

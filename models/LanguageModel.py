@@ -1,7 +1,6 @@
 # coding=utf-8
+# TODO: Not yet implemented!
 """
-Not yet implemented!
-
 The model for the character level speech recognizer.
 
 Based on the paper:
@@ -21,6 +20,7 @@ import os
 from datetime import datetime
 import logging
 from random import randint
+import util.dataprocessor as dataprocessor
 
 
 class LanguageModel(object):
@@ -602,23 +602,35 @@ class LanguageModel(object):
         return predictions
 
     @staticmethod
-    def build_dataset(input_set, batch_size, max_input_seq_length):
+    def build_dataset(input_set, batch_size, max_input_seq_length, char_map):
         length_set = [len(label) for label in input_set]
         input_dataset = tf.contrib.data.Dataset.from_tensor_slices(input_set)
         input_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(length_set)
         label_dataset = tf.contrib.data.Dataset.from_tensor_slices(input_set)
 
-        def _offset_text(label):
-            offseted_label = label[:]
-            offseted_label[:-1] = label[1:]
-            offseted_label[-1] = label[0]
+        def _transcode_label(label):
+            # Need to convert back to string because tf.py_func changed it to a numpy array
+            label = str(label, encoding='UTF-8')
+            label_transcoded = dataprocessor.DataProcessor.get_str_labels(char_map, label)
+            logging.debug("Returning label as : %s", label_transcoded)
+            return np.array(label_transcoded, dtype=np.int32)
+
+        def _transcode_and_offset_label(label):
+            # Need to convert back to string because tf.py_func changed it to a numpy array
+            label = str(label, encoding='UTF-8')
+            offseted_label = dataprocessor.DataProcessor.get_str_labels(char_map, label)
+            offseted_label = offseted_label[1:]
+            offseted_label.append(len(char_map) - 1)
+            logging.debug("Returning offseted label as : %s", offseted_label)
             return np.array(offseted_label, dtype=np.int32)
 
-        label_dataset = label_dataset.map(lambda label: tf.py_func(_offset_text, [label], tf.int32),
+        input_dataset = input_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
+                                          num_threads=2, output_buffer_size=30)
+        label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_and_offset_label, [label], tf.int32),
                                           num_threads=2, output_buffer_size=30)
 
         # Batch the datasets
-        input_dataset = input_dataset.padded_batch(batch_size, padded_shapes=[None, None])
+        input_dataset = input_dataset.padded_batch(batch_size, padded_shapes=[None])
         label_dataset = label_dataset.dense_to_sparse_batch(batch_size=batch_size, row_shape=[max_input_seq_length])
         input_length_dataset = input_length_dataset.batch(batch_size)
 
