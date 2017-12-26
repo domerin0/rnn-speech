@@ -57,7 +57,7 @@ Then make sure to set those parameters in your config file :
     use_config_file_if_checkpoint_exists : True
     steps_per_checkpoint : 100
     steps_per_evaluation : 1000
-    checkpoint_dir : trained_models/acoustic_model/english
+    checkpoint_dir : trained_models/english
         
     [training]
     max_input_seq_length : 3510

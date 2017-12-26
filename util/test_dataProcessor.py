@@ -3,6 +3,8 @@ import unittest
 import os
 import shutil
 import util.dataprocessor as dataprocessor
+from models.SpeechRecognizer import ENGLISH_CHAR_MAP
+import numpy as np
 
 
 class TestDataProcessor(unittest.TestCase):
@@ -126,6 +128,106 @@ class TestDataProcessor(unittest.TestCase):
                                 "Vystadial_2013/data_voip_en/dev/jurcic-028-121024_234433_0013625_0013836.wav",
                                 "alright thank you and goodbye", None]
                                ])
+
+    def test_get_str_labels_and_reverse(self):
+        text = "What ! I'm not looking for... I'll do it..."
+        cleaned_str = dataprocessor.DataProcessor.clean_label(text)
+        numeric_label = dataprocessor.DataProcessor.get_str_labels(ENGLISH_CHAR_MAP, cleaned_str)
+        new_text = dataprocessor.DataProcessor.get_labels_str(ENGLISH_CHAR_MAP, numeric_label)
+        self.assertEqual(new_text, cleaned_str)
+
+    def test_3_chars_token_in_str_end(self):
+        text = "it'll"
+        cleaned_str = dataprocessor.DataProcessor.clean_label(text)
+        numeric_label = dataprocessor.DataProcessor.get_str_labels(ENGLISH_CHAR_MAP, cleaned_str)
+        self.assertEqual(numeric_label, [60, 45, 1, 79])
+
+    def test_first_value_in_char_map(self):
+        text = "'d"
+        cleaned_str = dataprocessor.DataProcessor.clean_label(text)
+        numeric_label = dataprocessor.DataProcessor.get_str_labels(ENGLISH_CHAR_MAP, cleaned_str)
+        self.assertEqual(numeric_label, [0, 79])
+
+    def test_get_str_to_one_hot_encoded_first_item(self):
+        vector = dataprocessor.DataProcessor.get_str_to_one_hot_encoded(ENGLISH_CHAR_MAP, "'d")
+        np.testing.assert_array_equal(vector, [[1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0.],
+                                               [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 1.]
+                                               ])
+
+    def test_get_str_to_one_hot_encoded_last_item(self):
+        vector = dataprocessor.DataProcessor.get_str_to_one_hot_encoded(ENGLISH_CHAR_MAP, "_", add_eos=False)
+        np.testing.assert_array_equal(vector, [[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 1.]
+                                               ])
+
+    def test_get_str_to_one_hot_encoded_double_letter(self):
+        vector = dataprocessor.DataProcessor.get_str_to_one_hot_encoded(ENGLISH_CHAR_MAP, "bb", add_eos=False)
+        np.testing.assert_array_equal(vector, [[0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0.]
+                                               ])
+
+    def test_get_str_to_one_hot_encoded_full_string(self):
+        vector = dataprocessor.DataProcessor.get_str_to_one_hot_encoded(ENGLISH_CHAR_MAP, "i will")
+        # This will be encoded to "IWill_" with "ll" being a specific letter
+        np.testing.assert_array_equal(vector, [[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0.],
+                                               [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0.,
+                                                0., 0.],
+                                               [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0.],
+                                               [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0.],
+                                               [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                                                0., 1.]
+                                               ])
+
 
 if __name__ == '__main__':
     unittest.main()
