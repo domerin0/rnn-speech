@@ -12,7 +12,7 @@ double delta feature vectors (40 or 120 dim inputs respectively).
 The audio signal processing is done using [librosa](https://github.com/librosa/librosa).
 
 Currently only the acoustic model has been completed.
-One pre-trained example is available [here](trained_models/acoustic_model/english) and can be tried
+One pre-trained example is available [here](trained_models/english/acoustic) and can be tried
 on any file (your own recorded voice for example).
 
 Results on LibriSpeech's test-clean evaluation set for the pre-trained model is :
