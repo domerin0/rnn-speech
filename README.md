@@ -1,11 +1,11 @@
 # rnn-speech
-Character level speech recognizer using ctc loss with deep rnns in TensorFlow.
+Character level speech recognizer using ctc loss with deep RNNs in TensorFlow.
 
 ### About
 
 This is an ongoing project, working towards an implementation of the charater-level ISR detailed in the
 [paper](http://arxiv.org/pdf/1601.06581v2.pdf) by Kyuyeon Hwang and Wonyong Sung. It works at the character level
-using 1 deep rnn trained with ctc loss for the acoustic model, and one deep rnn trained for a character-level language
+using one deep RNN trained with ctc loss for the acoustic model, and one deep RNN trained for a character-level language
 model. The acoustic model can read in either mel frequency cepstral coefficient, or mel filterbank with delta and
 double delta feature vectors (40 or 120 dim inputs respectively).
 
@@ -46,7 +46,7 @@ If you have already cloned the repository without lfs, you can download the miss
 #### Install dependencies
 ##### Required
 
-1. [TensorFlow](https://www.tensorflow.org) (>= 1.3rc1)
+1. [TensorFlow](https://www.tensorflow.org) (>= 1.4)
 1. [librosa](https://github.com/librosa/librosa)
 1. [mutagen](https://github.com/quodlibet/mutagen)
 

@@ -756,7 +756,7 @@ class AcousticModel(object):
                 logging.debug("Running a batch")
                 input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
                 predictions = self.process_input(sess, input_feat_vecs, input_feat_vec_lengths,
-                                                       run_options=run_options, run_metadata=run_metadata)
+                                                 run_options=run_options, run_metadata=run_metadata)
                 for index, prediction in enumerate(predictions):
                     transcribed_text = dataprocessor.DataProcessor.get_labels_str(char_map, prediction)
                     true_label = labels[index]
@@ -804,9 +804,9 @@ class AcousticModel(object):
         labels = [item[1] for item in input_set]
         audio_lengths = [item[2] for item in input_set]
 
-        audio_dataset = tf.contrib.data.Dataset.from_tensor_slices(audio_streams)
-        label_dataset = tf.contrib.data.Dataset.from_tensor_slices(labels)
-        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.float32))
+        audio_dataset = tf.data.Dataset.from_tensor_slices(audio_streams)
+        label_dataset = tf.data.Dataset.from_tensor_slices(labels)
+        audio_length_dataset = tf.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.float32))
 
         # Read audio data and convert string labels
         def _read_audio(filename):
@@ -830,20 +830,21 @@ class AcousticModel(object):
             return np.array(label_transcoded, dtype=np.int32)
 
         audio_dataset = audio_dataset.map(lambda filename: tf.py_func(_read_audio, [filename], tf.float32),
-                                          num_threads=2, output_buffer_size=30)
+                                          num_parallel_calls=2).prefetch(30)
         label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
-                                          num_threads=2, output_buffer_size=30)
+                                          num_parallel_calls=2).prefetch(30)
         audio_length_dataset = audio_length_dataset.map(
             lambda duration: tf.py_func(_convert_audio_length, [duration], tf.int32),
-            num_threads=2, output_buffer_size=30)
+            num_parallel_calls=2).prefetch(30)
 
         # Batch the datasets
         audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=[None, None])
-        label_dataset = label_dataset.dense_to_sparse_batch(batch_size=batch_size, row_shape=[max_target_seq_length])
+        label_dataset = label_dataset.apply(tf.contrib.data.dense_to_sparse_batch(batch_size=batch_size,
+                                                                                  row_shape=[max_target_seq_length]))
         audio_length_dataset = audio_length_dataset.batch(batch_size)
 
         # And zip them together
-        dataset = tf.contrib.data.Dataset.zip((audio_dataset, audio_length_dataset, label_dataset))
+        dataset = tf.data.Dataset.zip((audio_dataset, audio_length_dataset, label_dataset))
 
         # TODO : add a filter for files which are too long (currently de-structuring with Dataset.filter is not
         #        supported in python3)
@@ -859,7 +860,7 @@ class AcousticModel(object):
         :param dataset: a tensorflow Dataset
         :return iterator: tensorflow Iterator for the dataset
         """
-        iterator = tf.contrib.data.Iterator.from_dataset(dataset)
+        iterator = dataset.make_initializable_iterator()
         self.iterator_get_next_op = iterator.get_next()
         return iterator
 
@@ -875,8 +876,8 @@ class AcousticModel(object):
         :return t_iterator: tensorflow Iterator for the train dataset
         :return v_iterator: tensorflow Iterator for the valid dataset
         """
-        t_iterator = tf.contrib.data.Iterator.from_dataset(train_dataset)
-        v_iterator = tf.contrib.data.Iterator.from_dataset(valid_dataset)
+        t_iterator = train_dataset.make_initializable_iterator()
+        v_iterator = valid_dataset.make_initializable_iterator()
         self.iterator_get_next_op = tf.cond(self.is_training_var, lambda: t_iterator.get_next(),
                                             lambda: v_iterator.get_next())
         return t_iterator, v_iterator
