@@ -47,7 +47,7 @@ class TestLanguageModel(unittest.TestCase):
             # Create a Dataset from the train_set and the test_set
             dataset = model.build_dataset(["the brown lazy fox", "the red quick fox"], self.batch_size,
                                           self.max_input_seq_length, ENGLISH_CHAR_MAP)
-            iterator = tf.contrib.data.Iterator.from_dataset(dataset)
+            iterator = dataset.make_initializable_iterator()
             sess.run(iterator.initializer)
             iterator_get_next_op = iterator.get_next()
             input_dataset, input_length_dataset, label_dataset = sess.run(iterator_get_next_op)

@@ -68,16 +68,10 @@ class AudioProcessor(object):
         transposed_mfcc = mfcc.transpose()
         mfcc_length = len(transposed_mfcc)
 
+        # Truncate if audio sequence is too long
         if mfcc_length > self.max_input_seq_length:
-            # Audio sequence too long, need to cut
             transposed_mfcc = transposed_mfcc[:self.max_input_seq_length]
-        #elif mfcc_length < self.max_input_seq_length:
-        #    # Audio sequence too short, need padding to align each sequence
-        #    # (for technical reason, padded part won't be trained or tested)
-        #    pad_length = self.max_input_seq_length - mfcc_length
-        #    padding = np.zeros((pad_length, 20), dtype=np.float)
-        #    transposed_mfcc = np.concatenate((transposed_mfcc, padding), 0)
-        #assert len(transposed_mfcc) == self.max_input_seq_length, "Padding incorrect..."
+
         return transposed_mfcc, mfcc_length
 
     def _extract_fbank(self, sig, sr):
@@ -159,13 +153,9 @@ class AudioProcessor(object):
 
         assert np.shape(fbank_feat)[1] == 120, "input dimensions incorrect"
 
+        # Truncate if audio sequence is too long
         fbank_length = len(fbank_feat)
         if fbank_length > self.max_input_seq_length:
             fbank_feat = fbank_feat[:self.max_input_seq_length]
-        elif fbank_length < self.max_input_seq_length:
-            pad_length = self.max_input_seq_length - fbank_length
-            # For now length is 120 (feature vector excluding energies)
-            padding = np.zeros((pad_length, 120), dtype=np.float)
-            fbank_feat = np.concatenate((fbank_feat, padding), 0)
-        assert len(fbank_feat) == self.max_input_seq_length, "Padding incorrect..."
+
         return fbank_feat, fbank_length

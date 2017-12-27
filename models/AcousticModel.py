@@ -152,7 +152,9 @@ class AcousticModel(object):
             input_seq_lengths = tf.pad(input_lengths, [[0, self.batch_size - tf.size(input_lengths)]])
 
             # Label tensor must be provided as a sparse tensor.
-            sparse_labels = tf.SparseTensor(label_batch[0], label_batch[1], [self.batch_size, label_batch[2][1]])
+            idx = tf.where(tf.not_equal(label_batch, 0))
+            sparse_labels = tf.SparseTensor(idx, tf.gather_nd(label_batch, idx),
+                                            [self.batch_size, self.max_target_seq_length])
             # Pad sparse_labels if the batch is not complete
             sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, self.num_labels - 1)
         else:
@@ -756,7 +758,7 @@ class AcousticModel(object):
                 logging.debug("Running a batch")
                 input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
                 predictions = self.process_input(sess, input_feat_vecs, input_feat_vec_lengths,
-                                                       run_options=run_options, run_metadata=run_metadata)
+                                                 run_options=run_options, run_metadata=run_metadata)
                 for index, prediction in enumerate(predictions):
                     transcribed_text = dataprocessor.DataProcessor.get_labels_str(char_map, prediction)
                     true_label = labels[index]
@@ -800,55 +802,42 @@ class AcousticModel(object):
     def build_dataset(input_set, batch_size, max_input_seq_length, max_target_seq_length,
                       signal_processing, char_map):
         # Separate each data from the input list
-        audio_streams = [item[0] for item in input_set]
-        labels = [item[1] for item in input_set]
-        audio_lengths = [item[2] for item in input_set]
-
-        audio_dataset = tf.contrib.data.Dataset.from_tensor_slices(audio_streams)
-        label_dataset = tf.contrib.data.Dataset.from_tensor_slices(labels)
-        audio_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(np.array(audio_lengths, dtype=np.float32))
+        audio_and_label_set = [[item[0], item[1]] for item in input_set]
+        audio_dataset = tf.data.Dataset.from_tensor_slices(audio_and_label_set)
 
         # Read audio data and convert string labels
-        def _read_audio(filename):
+        def _read_audio_and_transcode_label(filename_label):
             # Need to convert back to string because tf.py_func changed it to a numpy array
-            filename = str(filename, encoding='UTF-8')
-            logging.debug("Reading file : %s", filename)
+            filename = str(filename_label[0], encoding='UTF-8')
+            label = str(filename_label[1], encoding='UTF-8')
             audio_processor = audioprocessor.AudioProcessor(max_input_seq_length, signal_processing)
-            audio_decoded, _ = audio_processor.process_audio_file(filename)
-            return np.array(audio_decoded, dtype=np.float32)
-
-        def _convert_audio_length(duration):
-            length = audioprocessor.AudioProcessor.get_mfcc_length_from_duration(duration)
-            logging.debug("Returning mfcc_length of : %d", length)
-            return np.array(length, dtype=np.int32)
-
-        def _transcode_label(label):
-            # Need to convert back to string because tf.py_func changed it to a numpy array
-            label = str(label, encoding='UTF-8')
+            audio_decoded, audio_length = audio_processor.process_audio_file(filename)
             label_transcoded = dataprocessor.DataProcessor.get_str_labels(char_map, label)
-            logging.debug("Returning label as : %s", label_transcoded)
-            return np.array(label_transcoded, dtype=np.int32)
+            return np.array(audio_decoded, dtype=np.float32), np.array(audio_length, dtype=np.int32),\
+                np.array(label_transcoded, dtype=np.int32)
 
-        audio_dataset = audio_dataset.map(lambda filename: tf.py_func(_read_audio, [filename], tf.float32),
-                                          num_threads=2, output_buffer_size=30)
-        label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
-                                          num_threads=2, output_buffer_size=30)
-        audio_length_dataset = audio_length_dataset.map(
-            lambda duration: tf.py_func(_convert_audio_length, [duration], tf.int32),
-            num_threads=2, output_buffer_size=30)
+        audio_dataset = audio_dataset.map(lambda filename_label: tuple(tf.py_func(_read_audio_and_transcode_label,
+                                                                                  [filename_label],
+                                                                                  [tf.float32, tf.int32, tf.int32])),
+                                          num_parallel_calls=2).prefetch(30)
 
         # Batch the datasets
-        audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=[None, None])
-        label_dataset = label_dataset.dense_to_sparse_batch(batch_size=batch_size, row_shape=[max_target_seq_length])
-        audio_length_dataset = audio_length_dataset.batch(batch_size)
+        audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=([max_input_seq_length, None],
+                                                                              tf.TensorShape([]),
+                                                                              [None]))
 
-        # And zip them together
-        dataset = tf.contrib.data.Dataset.zip((audio_dataset, audio_length_dataset, label_dataset))
+        # Convert the labels' batch to a sparse tensor
+        # TODO : support will probably be ok with TF v1.5
+        # def _convert_labels_to_sparse(audio, audio_lengths, dense_labels):
+        #    idx = tf.where(tf.not_equal(dense_labels, 0))
+        #    sparse_labels = tf.SparseTensor(idx, tf.gather_nd(dense_labels, idx), [max_target_seq_length, batch_size])
+        #    return audio, audio_lengths, sparse_labels
+        # audio_dataset = audio_dataset.map(_convert_labels_to_sparse)
 
         # TODO : add a filter for files which are too long (currently de-structuring with Dataset.filter is not
         #        supported in python3)
 
-        return dataset
+        return audio_dataset
 
     def add_dataset_input(self, dataset):
         """
@@ -859,7 +848,7 @@ class AcousticModel(object):
         :param dataset: a tensorflow Dataset
         :return iterator: tensorflow Iterator for the dataset
         """
-        iterator = tf.contrib.data.Iterator.from_dataset(dataset)
+        iterator = dataset.make_initializable_iterator()
         self.iterator_get_next_op = iterator.get_next()
         return iterator
 
@@ -875,8 +864,8 @@ class AcousticModel(object):
         :return t_iterator: tensorflow Iterator for the train dataset
         :return v_iterator: tensorflow Iterator for the valid dataset
         """
-        t_iterator = tf.contrib.data.Iterator.from_dataset(train_dataset)
-        v_iterator = tf.contrib.data.Iterator.from_dataset(valid_dataset)
+        t_iterator = train_dataset.make_initializable_iterator()
+        v_iterator = valid_dataset.make_initializable_iterator()
         self.iterator_get_next_op = tf.cond(self.is_training_var, lambda: t_iterator.get_next(),
                                             lambda: v_iterator.get_next())
         return t_iterator, v_iterator

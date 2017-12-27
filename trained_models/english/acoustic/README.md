@@ -5,7 +5,7 @@ This directory contain a trained english acoustic model : 67.600 steps of 30 fil
 
 __Warnings :__ 
 * This model use 3 layers, default is 5 in config file
-* Tensorflow's team _love_ to change names of variables. This pre-trained model is "name compatible" with tensorflow 1.3
+* Tensorflow's team _love_ to change names of variables. This pre-trained model is "name compatible" with tensorflow 1.4
 and maybe the next versions... If your result is incorrect you should set log_level to DEBUG and check if the TF
 variable names in the beginning of the log matches those listed in _add_saving_op in AcousticModel.py
 

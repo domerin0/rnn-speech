@@ -605,9 +605,9 @@ class LanguageModel(object):
     def build_dataset(input_set, batch_size, max_input_seq_length, char_map):
         # TODO : fix size calculation
         length_set = [len(label) for label in input_set]
-        input_dataset = tf.contrib.data.Dataset.from_tensor_slices(input_set)
-        input_length_dataset = tf.contrib.data.Dataset.from_tensor_slices(length_set)
-        label_dataset = tf.contrib.data.Dataset.from_tensor_slices(input_set)
+        input_dataset = tf.data.Dataset.from_tensor_slices(input_set)
+        input_length_dataset = tf.data.Dataset.from_tensor_slices(length_set)
+        label_dataset = tf.data.Dataset.from_tensor_slices(input_set)
 
         def _transcode_label(label):
             # Need to convert back to string because tf.py_func changed it to a numpy array
@@ -625,17 +625,18 @@ class LanguageModel(object):
             return np.array(offseted_label, dtype=np.int32)
 
         input_dataset = input_dataset.map(lambda label: tf.py_func(_transcode_label, [label], tf.int32),
-                                          num_threads=2, output_buffer_size=30)
+                                          num_parallel_calls=2).prefetch(30)
         label_dataset = label_dataset.map(lambda label: tf.py_func(_transcode_and_offset_label, [label], tf.int32),
-                                          num_threads=2, output_buffer_size=30)
+                                          num_parallel_calls=2).prefetch(30)
 
         # Batch the datasets
         input_dataset = input_dataset.padded_batch(batch_size, padded_shapes=[None, None])
-        label_dataset = label_dataset.dense_to_sparse_batch(batch_size=batch_size, row_shape=[max_input_seq_length])
+        label_dataset = label_dataset.apply(tf.contrib.data.dense_to_sparse_batch(batch_size=batch_size,
+                                                                                  row_shape=[max_input_seq_length]))
         input_length_dataset = input_length_dataset.batch(batch_size)
 
         # And zip them together
-        dataset = tf.contrib.data.Dataset.zip((input_dataset, input_length_dataset, label_dataset))
+        dataset = tf.data.Dataset.zip((input_dataset, input_length_dataset, label_dataset))
 
         # TODO : add a filter for files which are too long (currently de-structuring with Dataset.filter is not
         #        supported in python3)
@@ -651,7 +652,7 @@ class LanguageModel(object):
         :param dataset: a tensorflow Dataset
         :return iterator: tensorflow Iterator for the dataset
         """
-        iterator = tf.contrib.data.Iterator.from_dataset(dataset)
+        iterator = dataset.make_initializable_iterator()
         self.iterator_get_next_op = iterator.get_next()
         return iterator
 
@@ -667,8 +668,8 @@ class LanguageModel(object):
         :return t_iterator: tensorflow Iterator for the train dataset
         :return v_iterator: tensorflow Iterator for the valid dataset
         """
-        t_iterator = tf.contrib.data.Iterator.from_dataset(train_dataset)
-        v_iterator = tf.contrib.data.Iterator.from_dataset(valid_dataset)
+        t_iterator = train_dataset.make_initializable_iterator()
+        v_iterator = valid_dataset.make_initializable_iterator()
         self.iterator_get_next_op = tf.cond(self.is_training_var, lambda: t_iterator.get_next(),
                                             lambda: v_iterator.get_next())
         return t_iterator, v_iterator
