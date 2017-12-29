@@ -241,6 +241,11 @@ def process_file(audio_processor, hyper_params, file):
     if original_feat_vec_length > hyper_params["max_input_seq_length"]:
         logging.warning("File too long")
         return
+    elif original_feat_vec_length < hyper_params["max_input_seq_length"]:
+        # Pad the feat_vec with zeros
+        pad_length = hyper_params["max_input_seq_length"] - original_feat_vec_length
+        padding = np.zeros((pad_length, hyper_params["input_dim"]), dtype=np.float)
+        feat_vec = np.concatenate((feat_vec, padding), 0)
 
     with tf.Session() as sess:
         # create model
