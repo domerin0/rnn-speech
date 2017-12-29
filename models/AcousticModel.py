@@ -186,14 +186,14 @@ class AcousticModel(object):
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
 
-    def _build_base_rnn(self, inputs, input_seq_lengths, forward_only=True):
+    def _build_base_rnn(self, rnn_inputs, input_seq_lengths, forward_only=True):
         """
         Build the Acoustic RNN
 
         Parameters
         ----------
-        :param inputs: inputs to the RNN
-        :param input_seq_lengths: vector containing the length of each input from 'inputs'
+        :param rnn_inputs: inputs to the RNN
+        :param input_seq_lengths: vector containing the length of each input from 'rnn_inputs'
         :param forward_only: whether the RNN will be used for training or not (if true then add a dropout layer)
         
         Returns
@@ -211,6 +211,9 @@ class AcousticModel(object):
         # Define a variable to keep track of the learning process step
         global_step = tf.Variable(0, trainable=False, name='global_step')
 
+        # Properly define each dim of the rnn_inputs for the dynamic_rnn
+        rnn_inputs.set_shape([self.max_input_seq_length, self.batch_size, self.input_dim])
+
         # If building the RNN for training then create dropout rate placeholders
         input_keep_prob_ph = output_keep_prob_ph = None
         if not forward_only:
@@ -219,7 +222,16 @@ class AcousticModel(object):
                 input_keep_prob_ph = tf.placeholder(tf.float32)
                 output_keep_prob_ph = tf.placeholder(tf.float32)
 
-        # Define cells of acoustic model
+        # Add a batch normalization layer to the model if needed
+        if self.normalization:
+            with tf.name_scope('Normalization'):
+                epsilon = 1e-3
+                # Note : the tensor is [time, batch_size, input vector] so we go against dim 1
+                batch_mean, batch_var = tf.nn.moments(rnn_inputs, [1], shift=None, name="moments", keep_dims=True)
+                rnn_inputs = tf.nn.batch_normalization(rnn_inputs, batch_mean, batch_var, None, None,
+                                                       epsilon, name="batch_norm")
+
+        # Define RNN cells of acoustic model
         with tf.variable_scope('LSTM'):
             # Create each layer
             layers_list = []
@@ -235,28 +247,6 @@ class AcousticModel(object):
 
             # Store the layers in a multi-layer RNN
             cell = tf.contrib.rnn.MultiRNNCell(layers_list, state_is_tuple=True)
-
-        # Build the input layer between input and the RNN
-        with tf.variable_scope('Input_Layer'):
-            w_i = tf.get_variable("input_w", [self.input_dim, self.hidden_size], tf.float32,
-                                  initializer=tf.contrib.layers.xavier_initializer())
-            b_i = tf.get_variable("input_b", [self.hidden_size], tf.float32,
-                                  initializer=tf.constant_initializer(0.0))
-
-        # Apply the input layer to the network input to produce the input for the rnn part of the network
-        rnn_inputs = [tf.matmul(tf.squeeze(i, axis=[0]), w_i) + b_i
-                      for i in tf.split(axis=0, num_or_size_splits=self.max_input_seq_length, value=inputs)]
-        # Switch from a list to a tensor
-        rnn_inputs = tf.stack(rnn_inputs)
-
-        # Add a batch normalization layer to the model if needed
-        if self.normalization:
-            with tf.name_scope('Normalization'):
-                epsilon = 1e-3
-                # Note : the tensor is [time, batch_size, input vector] so we go against dim 1
-                batch_mean, batch_var = tf.nn.moments(rnn_inputs, [1], shift=None, name="moments", keep_dims=True)
-                rnn_inputs = tf.nn.batch_normalization(rnn_inputs, batch_mean, batch_var, None, None,
-                                                       epsilon, name="batch_norm")
 
         # Define some variables to store the RNN state
         # Note : tensorflow keep the state inside a batch but it's necessary to do this in order to keep the state
@@ -305,8 +295,10 @@ class AcousticModel(object):
                                   initializer=tf.constant_initializer(0.0))
 
         # Compute the logits (each char probability for each timestep of the input, for each item of the batch)
-        logits = tf.stack([tf.matmul(tf.squeeze(i, axis=[0]), w_o) + b_o
-                          for i in tf.split(axis=0, num_or_size_splits=self.max_input_seq_length, value=rnn_output)])
+        with tf.name_scope('Output'):
+            logits = tf.stack([tf.matmul(tf.squeeze(i, axis=[0]), w_o) + b_o
+                               for i in tf.split(axis=0, num_or_size_splits=self.max_input_seq_length,
+                                                 value=rnn_output)])
 
         # Compute the prediction which is the best "path" of probabilities for each item of the batch
         decoded, _log_prob = tf.nn.ctc_beam_search_decoder(logits, input_seq_lengths)
@@ -516,8 +508,7 @@ class AcousticModel(object):
             logging.debug("TF variable : %s - %s", var.name, var)
 
         save_list = [var for var in tf.global_variables()
-                     if (var.name.find('/input_w:0') != -1) or (var.name.find('/input_b:0') != -1) or
-                        (var.name.find('/output_w:0') != -1) or (var.name.find('/output_b:0') != -1) or
+                     if (var.name.find('/output_w:0') != -1) or (var.name.find('/output_b:0') != -1) or
                         (var.name.find('global_step:0') != -1) or (var.name.find('learning_rate:0') != -1) or
                         (var.name.find('/kernel:0') != -1) or (var.name.find('/bias:0') != -1)]
         if len(save_list) == 0:
@@ -799,7 +790,7 @@ class AcousticModel(object):
         return mean_loss, mean_error_rate, current_step
 
     @staticmethod
-    def build_dataset(input_set, batch_size, max_input_seq_length, max_target_seq_length,
+    def build_dataset(input_set, batch_size, max_input_seq_length, _max_target_seq_length,
                       signal_processing, char_map):
         # Separate each data from the input list
         audio_and_label_set = [[item[0], item[1]] for item in input_set]
@@ -819,13 +810,14 @@ class AcousticModel(object):
         audio_dataset = audio_dataset.map(lambda filename_label: tuple(tf.py_func(_read_audio_and_transcode_label,
                                                                                   [filename_label],
                                                                                   [tf.float32, tf.int32, tf.int32])),
-                                          num_parallel_calls=2).prefetch(30)
+                                          num_parallel_calls=4)
 
         # Batch the datasets
         audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=([max_input_seq_length, None],
                                                                               tf.TensorShape([]),
                                                                               [None]))
-
+        # Prefetch some data
+        audio_dataset = audio_dataset.prefetch(5)
         # Convert the labels' batch to a sparse tensor
         # TODO : support will probably be ok with TF v1.5
         # def _convert_labels_to_sparse(audio, audio_lengths, dense_labels):
