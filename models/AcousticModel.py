@@ -810,6 +810,13 @@ class AcousticModel(object):
                                                                                   [tf.float32, tf.int32, tf.int32])),
                                           num_parallel_calls=4)
 
+        # Filter files too small or too long
+        min_size = int(dataprocessor.DEFAULT_MIN_AUDIO_LENGTH // audioprocessor.FRAME_STRIDE)
+        audio_dataset = audio_dataset.filter(lambda _audio, length, _label:
+                                             tf.greater(length, tf.constant(min_size, tf.int32)))
+        audio_dataset = audio_dataset.filter(lambda _audio, length, _label:
+                                             tf.less_equal(length, tf.constant(max_input_seq_length, tf.int32)))
+
         # Batch the datasets
         audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=([max_input_seq_length, None],
                                                                               tf.TensorShape([]),
