@@ -48,7 +48,6 @@ If you have already cloned the repository without lfs, you can download the miss
 
 1. [TensorFlow](https://www.tensorflow.org) (>= 1.4)
 1. [librosa](https://github.com/librosa/librosa)
-1. [mutagen](https://github.com/quodlibet/mutagen)
 
 Install required dependencies by running :
 

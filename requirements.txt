@@ -2,4 +2,3 @@ librosa
 tensorflow
 pyaudio
 numpy
-mutagen

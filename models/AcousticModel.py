@@ -792,9 +792,7 @@ class AcousticModel(object):
     @staticmethod
     def build_dataset(input_set, batch_size, max_input_seq_length, _max_target_seq_length,
                       signal_processing, char_map):
-        # Separate each data from the input list
-        audio_and_label_set = [[item[0], item[1]] for item in input_set]
-        audio_dataset = tf.data.Dataset.from_tensor_slices(audio_and_label_set)
+        audio_dataset = tf.data.Dataset.from_tensor_slices(input_set)
 
         # Read audio data and convert string labels
         def _read_audio_and_transcode_label(filename_label):

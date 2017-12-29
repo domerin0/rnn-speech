@@ -56,8 +56,7 @@ class SpeechRecognizer(object):
         return len(self.char_map)
 
     @staticmethod
-    def load_acoustic_dataset(training_dataset_dirs, test_dataset_dirs=None, training_filelist_cache=None,
-                              ordered=False, train_frac=None):
+    def load_acoustic_dataset(training_dataset_dirs, test_dataset_dirs=None, train_frac=None):
         """
         Load the datatsets for the acoustic model training
         Return a train set and an optional test set, each containing a list of [audio_file, label, audio_length]
@@ -66,8 +65,6 @@ class SpeechRecognizer(object):
         ----------
         :param training_dataset_dirs: directory where to find the training data
         :param test_dataset_dirs: directory where to find the test data (optional)
-        :param training_filelist_cache: path to the cache file for the training data (optional)
-        :param ordered: boolean indicating whether or not to order the dataset by audio files length (ascending)
         :param train_frac: the fraction of the training data to be used as test data
                            (only used if test_dataset_dirs is None)
         :return train_set, test_set: two lists of [audio_file, label, audio_length] where
@@ -75,12 +72,9 @@ class SpeechRecognizer(object):
                                          label is the true label for the audio file (relative to the char_map)
                                          audio_length if the length of the audio file
         """
-        data_processor = dataprocessor.DataProcessor(training_dataset_dirs, file_cache=training_filelist_cache)
+        data_processor = dataprocessor.DataProcessor(training_dataset_dirs)
         train_set = data_processor.get_dataset()
-        if ordered:
-            train_set = sorted(train_set, key=lambda x: x[2])
-        else:
-            shuffle(train_set)
+        shuffle(train_set)
         if test_dataset_dirs is not None:
             # Load the test set data
             data_processor = dataprocessor.DataProcessor(test_dataset_dirs)

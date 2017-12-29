@@ -31,14 +31,8 @@ def main():
     hyper_params["char_map_length"] = speech_reco.get_char_map_length()
 
     if prog_params['train_acoustic'] is True:
-        if hyper_params["dataset_size_ordering"] in ['True', 'First_run_only']:
-            ordered = True
-        else:
-            ordered = False
         train_set, test_set = speech_reco.load_acoustic_dataset(hyper_params["training_dataset_dirs"],
                                                                 hyper_params["test_dataset_dirs"],
-                                                                hyper_params["training_filelist_cache"],
-                                                                ordered,
                                                                 hyper_params["train_frac"])
         train_acoustic_rnn(train_set, test_set, hyper_params, prog_params)
     elif prog_params['train_language'] is True:
@@ -195,18 +189,14 @@ def train_acoustic_rnn(train_set, test_set, hyper_params, prog_params):
                         break
                     else:
                         # Rebuild the train dataset, shuffle it before if needed
-                        if hyper_params["dataset_size_ordering"] in ['False', 'First_run_only']:
-                            logging.info("Shuffling the training dataset")
-                            shuffle(train_set)
-                            train_dataset = model.build_dataset(train_set, hyper_params["batch_size"],
-                                                                hyper_params["max_input_seq_length"],
-                                                                hyper_params["max_target_seq_length"],
-                                                                hyper_params["signal_processing"],
-                                                                hyper_params["char_map"])
-                            sess.run(t_iterator.make_initializer(train_dataset))
-                        else:
-                            logging.info("Reuse the same training dataset")
-                            sess.run(t_iterator.initializer)
+                        logging.info("Shuffling the training dataset")
+                        shuffle(train_set)
+                        train_dataset = model.build_dataset(train_set, hyper_params["batch_size"],
+                                                            hyper_params["max_input_seq_length"],
+                                                            hyper_params["max_target_seq_length"],
+                                                            hyper_params["signal_processing"],
+                                                            hyper_params["char_map"])
+                        sess.run(t_iterator.make_initializer(train_dataset))
 
             # Save the model
             model.save(sess, hyper_params["checkpoint_dir"] + "/acoustic/")

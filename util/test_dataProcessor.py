@@ -107,17 +107,17 @@ class TestDataProcessor(unittest.TestCase):
         test_set = data_processor.get_dataset()
         self.assertCountEqual(test_set,
                               [[self.directory + "Libri/train-clean-100/19/198/19-198-0000.flac",
-                                "northanger abbey", None],
+                                "northanger abbey"],
                                [self.directory + "Libri/train-clean-100/19/198/19-198-0001.flac",
-                                "this little work", None]
+                                "this little work"]
                                ])
 
     def test_get_data_shtooka(self):
         data_processor = dataprocessor.DataProcessor(self.directory + "Shtooka")
         test_set = data_processor.get_dataset()
         self.assertCountEqual(test_set,
-                              [[self.directory + "Shtooka/flac/eng - I_arose.flac", "i arose", None],
-                               [self.directory + "Shtooka/flac/eng - I_ate.flac", "i ate", None]
+                              [[self.directory + "Shtooka/flac/eng - I_arose.flac", "i arose"],
+                               [self.directory + "Shtooka/flac/eng - I_ate.flac", "i ate"]
                                ])
 
     def test_get_data_vystadial_2013(self):
@@ -126,7 +126,7 @@ class TestDataProcessor(unittest.TestCase):
         self.assertCountEqual(test_set,
                               [[self.directory +
                                 "Vystadial_2013/data_voip_en/dev/jurcic-028-121024_234433_0013625_0013836.wav",
-                                "alright thank you and goodbye", None]
+                                "alright thank you and goodbye"]
                                ])
 
     def test_get_str_labels_and_reverse(self):

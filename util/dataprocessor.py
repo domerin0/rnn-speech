@@ -4,13 +4,10 @@ Reads in audio and text data, transforming it for input into the neural nets
 It will extract the dataset.
 """
 import os
-import pickle
+import re
 import subprocess
 import logging
 import configparser
-from multiprocessing import Pool
-import mutagen
-import time
 import numpy as np
 
 
@@ -19,43 +16,24 @@ DEFAULT_MIN_AUDIO_LENGTH = 0.4      # Default minimum duration (in seconds) of a
 
 
 class DataProcessor(object):
-    def __init__(self, raw_data_paths, file_cache=None, min_text_size=DEFAULT_MIN_TEXT_LENGTH,
-                 min_audio_size=DEFAULT_MIN_AUDIO_LENGTH):
+    def __init__(self, raw_data_paths, min_text_size=DEFAULT_MIN_TEXT_LENGTH, min_audio_size=DEFAULT_MIN_AUDIO_LENGTH):
         self.raw_data_paths = raw_data_paths.replace(" ", "").split(',')
-        self.file_cache = file_cache
         self.min_text_size = min_text_size
         self.min_audio_size = min_audio_size
 
-        # Load the file list
-        cached_data = self.load_filelist()
-        if cached_data is not None:
-            logging.info("{0} : Using audio files list from cache file.".format(self.raw_data_paths))
-            self.data = cached_data
-        else:
-            self.data = []
-            for path in self.raw_data_paths:
-                data_type = self.get_type(path)
-                if data_type == "Shtooka":
-                    self.data += self.get_data_shtooka(path)
-                elif data_type == "Vystadial_2013":
-                    self.data += self.get_data_vystadial_2013(path)
-                elif data_type == "TEDLIUM":
-                    self.data += self.get_data_tedlium(path)
-                elif data_type == "LibriSpeech":
-                    self.data += self.get_data_librispeech(path)
-                else:
-                    raise Exception("ERROR : unknown training_dataset_type")
-
-            # Adding length
-            logging.info("Retrieving audio duration from {0} files. Please wait.".format(len(self.data)))
-            start_time = time.time()
-            self.data = self._add_audio_length_on_dataset(self.data)
-            logging.info("--- Duration : {0}".format(time.time() - start_time))
-
-            # Save the file list if a cache file is provided
-            if self.file_cache is not None:
-                logging.info("{0} : Saving audio files list to cache file.".format(self.raw_data_paths))
-                self.save_filelist(self.data)
+        self.data = []
+        for path in self.raw_data_paths:
+            data_type = self.get_type(path)
+            if data_type == "Shtooka":
+                self.data += self.get_data_shtooka(path)
+            elif data_type == "Vystadial_2013":
+                self.data += self.get_data_vystadial_2013(path)
+            elif data_type == "TEDLIUM":
+                self.data += self.get_data_tedlium(path)
+            elif data_type == "LibriSpeech":
+                self.data += self.get_data_librispeech(path)
+            else:
+                raise Exception("ERROR : unknown training_dataset_type")
 
         # Check that there is data
         if len(self.data) == 0:
@@ -63,8 +41,6 @@ class DataProcessor(object):
 
         # Filtering small text items
         self.data = [item for item in self.data if len(item[1]) > self.min_text_size]
-        # Filtering small files
-        self.data = [item for item in self.data if item[2] > self.min_audio_size]
 
     def get_dataset(self):
         return self.data
@@ -207,61 +183,33 @@ class DataProcessor(object):
     @classmethod
     def get_type(cls, raw_data_path):
         # Check for ".trn" files
-        files = cls.find_files(raw_data_path, ".trn")
+        files = cls.find_files(raw_data_path, "^.*\.trn$")
         if files:
             return "Vystadial_2013"
         # Check for ".stm" files
-        files = cls.find_files(raw_data_path, ".stm")
+        files = cls.find_files(raw_data_path, "^.*\.stm$")
         if files:
             return "TEDLIUM"
         # Check for "index.tag.txt" files
-        files = cls.find_files(raw_data_path, "index.tags.txt")
+        files = cls.find_files(raw_data_path, "^index\.tags\.txt$")
         if files:
             return "Shtooka"
         # Check for ".trans.txt" files
-        files = cls.find_files(raw_data_path, ".trans.txt")
+        files = cls.find_files(raw_data_path, "^.*\.trans\.txt$")
         if files:
             return "LibriSpeech"
         return "Unrecognized"
 
     @staticmethod
-    def find_files(root_search_path, files_extension):
+    def find_files(root_search_path, pattern):
         files_list = []
+        reg_expr = re.compile(pattern)
         for root, _, files in os.walk(root_search_path):
-            files_list.extend([os.path.join(root, file) for file in files if file.endswith(files_extension)])
+            files_list.extend([os.path.join(root, file) for file in files if reg_expr.match(file)])
         return files_list
 
-    @staticmethod
-    def _add_audio_length_on_file(audio_file, text, _length):
-        file = mutagen.File(audio_file)
-        try:
-            length = file.info.length
-        except AttributeError:
-            # In case the type was not recognized by mutagen
-            logging.warning("Audio file incorrect : %s", audio_file)
-            length = 0
-        return [audio_file, text, length]
-
-    @staticmethod
-    def _add_audio_length_on_dataset(file_list):
-        with Pool() as p:
-            result = p.starmap(DataProcessor._add_audio_length_on_file, file_list)
-        return result
-
-    def save_filelist(self, data):
-        with open(self.file_cache, 'wb') as handle:
-            pickle.dump([self.raw_data_paths, data], handle)
-
-    def load_filelist(self):
-        if (self.file_cache is not None) and (os.path.exists(self.file_cache)):
-            with open(self.file_cache, 'rb') as handle:
-                [data_path, data] = pickle.load(handle)
-            if data_path == self.raw_data_paths:
-                return data
-        return None
-
     def get_data_librispeech(self, raw_data_path):
-        text_files = self.find_files(raw_data_path, ".txt")
+        text_files = self.find_files(raw_data_path, "^.*\.txt$")
         result = []
         for text_file in text_files:
             directory = os.path.dirname(text_file)
@@ -274,11 +222,11 @@ class DataProcessor(object):
                         break
                     audio_file = directory + "/" + head + ".flac"
                     if os.path.exists(audio_file):
-                        result.append([audio_file, self.clean_label(line.replace(head, "")), None])
+                        result.append([audio_file, self.clean_label(line.replace(head, ""))])
         return result
 
     def get_data_shtooka(self, raw_data_path):
-        text_files = self.find_files(raw_data_path, ".txt")
+        text_files = self.find_files(raw_data_path, "^.*\.txt$")
         # Build from index_tags
         result = []
         for file in text_files:
@@ -289,22 +237,22 @@ class DataProcessor(object):
                 for section in config.sections():
                     audio_file = root + section
                     if os.path.exists(audio_file):
-                        result.append([audio_file, self.clean_label(config[section]['SWAC_TEXT']), None])
+                        result.append([audio_file, self.clean_label(config[section]['SWAC_TEXT'])])
         return result
 
     def get_data_vystadial_2013(self, raw_data_path):
-        wav_audio_files = self.find_files(raw_data_path, ".wav")
+        wav_audio_files = self.find_files(raw_data_path, "^.*\.wav$")
         # Build from index_tags
         result = []
         for file in wav_audio_files:
             if os.path.exists(file + ".trn"):
                 with open(file + ".trn", "r") as f:
                     words = f.readline()
-                    result.append([file, self.clean_label(words), None])
+                    result.append([file, self.clean_label(words)])
         return result
 
     def get_data_tedlium(self, raw_data_path):
-        stm_files = self.find_files(raw_data_path, ".stm")
+        stm_files = self.find_files(raw_data_path, "^.*\.stm$")
         # Build from index_tags
         result = []
         for file in stm_files:
@@ -324,7 +272,7 @@ class DataProcessor(object):
                         if not os.path.exists(wav_file):
                             extract_result = self.extract_wav_from_sph(sph_file, wav_file, start, end)
                         if extract_result is not False:
-                            result.append([wav_file, self.clean_label(line_list[6]), None])
+                            result.append([wav_file, self.clean_label(line_list[6])])
         return result
 
     @staticmethod

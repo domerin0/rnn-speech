@@ -120,7 +120,6 @@ class HyperParameterHandler(object):
         dic["steps_per_evaluation"] = config.getint(general_section, "steps_per_evaluation")
         dic["checkpoint_dir"] = config.get(general_section, "checkpoint_dir")
         dic["training_dataset_dirs"] = config.get(training_section, "training_dataset_dirs")
-        dic["training_filelist_cache"] = config.get(training_section, "training_filelist_cache", fallback=None)
         dic["test_dataset_dirs"] = config.get(training_section, "test_dataset_dirs", fallback=None)
         dic["train_frac"] = config.getfloat(training_section, "train_frac", fallback=None)
         dic["max_input_seq_length"] = config.getint(training_section, "max_input_seq_length")
@@ -129,9 +128,7 @@ class HyperParameterHandler(object):
         if dic["tensorboard_dir"] is not None and not os.path.exists(dic["tensorboard_dir"]):
             dic["tensorboard_dir"] = None
         dic["batch_normalization"] = config.getboolean(training_section, "batch_normalization", fallback=False)
-        dic["dataset_size_ordering"] = config.get(training_section, "dataset_size_ordering",
-                                                  vars={'True': 'True', 'False': 'False',
-                                                        'First_run_only': 'First_run_only'}, fallback='False')
+
         dic["log_file"] = config.get(log_section, "log_file", fallback=None)
         log_level = config.get(log_section, "log_level", fallback='WARNING')
         dic["log_level"] = getattr(logging, log_level)
