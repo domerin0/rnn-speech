@@ -26,18 +26,6 @@ class AudioProcessor(object):
             raise ValueError("{0} is not a valid extraction function, \
             only fbank and mfcc are accepted.".format(self.feature_type))
 
-    @staticmethod
-    def get_mfcc_length_from_duration(duration):
-        """
-        Evaluate the mfcc_length for a given file
-        Note : returned value is an estimation, librosa will pad so the real size can be bigger (+1 to +3)
-        
-        :param float duration: duration of the audio file in seconds
-        :return int: estimated mfcc_length
-        """
-        length = int(duration // FRAME_STRIDE) - 1
-        return length
-
     def process_audio_file(self, file_name):
         """
         Reads in audio file, processes it
@@ -47,7 +35,7 @@ class AudioProcessor(object):
         :returns: mfcc_length: original length of the mfcc before padding
         """
         sig, sr = librosa.load(file_name, mono=True)
-        return self._extract_function(sig, sr)
+        return self._extract_function(sig, sr, self.max_input_seq_length)
 
     def process_signal(self, sig, sr):
         """
@@ -58,9 +46,10 @@ class AudioProcessor(object):
         :returns: mfcc: padded feature tensor
         :returns: mfcc_length: original length of the mfcc before padding
         """
-        return self._extract_function(sig, sr)
+        return self._extract_function(sig, sr, self.max_input_seq_length)
 
-    def _extract_mfcc(self, sig, sr):
+    @staticmethod
+    def _extract_mfcc(sig, sr, max_input_seq_length):
         # mfcc
         mfcc = librosa.feature.mfcc(sig, sr, hop_length=int(round(sr * FRAME_STRIDE)),
                                     n_fft=int(round(sr * FRAME_SIZE)))
@@ -69,12 +58,13 @@ class AudioProcessor(object):
         mfcc_length = len(transposed_mfcc)
 
         # Truncate if audio sequence is too long
-        if mfcc_length > self.max_input_seq_length:
-            transposed_mfcc = transposed_mfcc[:self.max_input_seq_length]
+        if mfcc_length > max_input_seq_length:
+            transposed_mfcc = transposed_mfcc[:max_input_seq_length]
 
         return transposed_mfcc, mfcc_length
 
-    def _extract_fbank(self, sig, sr):
+    @staticmethod
+    def _extract_fbank(sig, sr, max_input_seq_length):
         """
         Compute log mel filterbank features with deltas and double deltas
 
@@ -147,7 +137,7 @@ class AudioProcessor(object):
         filter_banks = filter_banks.transpose()
         delta = librosa.feature.delta(filter_banks)
         double_delta = librosa.feature.delta(delta)
-        fbank_feat = np.vstack([filter_banks, delta, double_delta]);
+        fbank_feat = np.vstack([filter_banks, delta, double_delta])
 
         fbank_feat = fbank_feat.transpose()
 
@@ -155,7 +145,7 @@ class AudioProcessor(object):
 
         # Truncate if audio sequence is too long
         fbank_length = len(fbank_feat)
-        if fbank_length > self.max_input_seq_length:
-            fbank_feat = fbank_feat[:self.max_input_seq_length]
+        if fbank_length > max_input_seq_length:
+            fbank_feat = fbank_feat[:max_input_seq_length]
 
         return fbank_feat, fbank_length
