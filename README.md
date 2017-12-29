@@ -26,7 +26,7 @@ It lacks the character-level language model which is still in the works.
 The datasets currently supported are :
 * [LibriSpeech](http://www.openslr.org/12/) by Vassil Panayotov
 * [Shtooka](http://shtooka.net/)
-* [Vystadial 2013](http://hdl.handle.net/11858/00-097C-0000-0023-4670-6)
+* [Vystadial 2013](http://hdl.handle.net/11858/00-097C-0000-0023-4671-4)
 * [TED-LIUM](http://www-lium.univ-lemans.fr/en/content/ted-lium-corpus)
 
 The data is fed through two pipelines, one for testing, and the other for training.
@@ -142,9 +142,9 @@ http://shtooka.net
 
 #### Vystadial 2013
 ````
-Korvas, Matěj; Plátek, Ondřej; Dušek, Ondřej; Žilka, Lukáš and Jurčíček, Filip, 2014, Vystadial 2013 – Czech data,
-LINDAT/CLARIN digital library at Institute of Formal and Applied Linguistics, Charles University in Prague,
-http://hdl.handle.net/11858/00-097C-0000-0023-4670-6.
+Korvas, Matěj; Plátek, Ondřej; Dušek, Ondřej; et al., 2014, 
+  Vystadial 2013 – English data, LINDAT/CLARIN digital library at the Institute of Formal and Applied Linguistics (ÚFAL), Faculty of Mathematics and Physics, Charles University, 
+  http://hdl.handle.net/11858/00-097C-0000-0023-4671-4.
 ````
 
 #### TED-LIUM Corpus
