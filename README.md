@@ -24,10 +24,11 @@ It lacks the character-level language model which is still in the works.
 ### Data
 
 The datasets currently supported are :
-* [LibriSpeech](http://www.openslr.org/12/) by Vassil Panayotov
+* [LibriSpeech](http://www.openslr.org/12/)
 * [Shtooka](http://shtooka.net/)
 * [Vystadial 2013](http://hdl.handle.net/11858/00-097C-0000-0023-4671-4)
 * [TED-LIUM](http://www-lium.univ-lemans.fr/en/content/ted-lium-corpus)
+* [VCTK](http://homepages.inf.ed.ac.uk/jyamagis/page3/page58/page58.html)
 
 The data is fed through two pipelines, one for testing, and the other for training.
 
@@ -150,4 +151,12 @@ Korvas, Matěj; Plátek, Ondřej; Dušek, Ondřej; et al., 2014,
 ````
 A. Rousseau, P. Deléglise, and Y. Estève, "Enhancing the TED-LIUM Corpus with Selected Data for Language Modeling and More TED Talks",
 in Proceedings of the Ninth International Conference on Language Resources and Evaluation (LREC’14), May 2014.
+````
+
+#### CSTR VCTK Corpus
+````
+The CSTR VCTK Corpus was constructed by:
+Christophe Veaux (University of Edinburgh)
+Junichi Yamagishi (University of Edinburgh)
+Kirsten MacDonald
 ````

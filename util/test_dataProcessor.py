@@ -88,6 +88,23 @@ class TestDataProcessor(unittest.TestCase):
         os.makedirs(cls.directory + "TEDLIUM/test/sph/")
         open(cls.directory + "TEDLIUM/test/sph/AimeeMullins_2009P.sph", 'a').close()
 
+        # Setup VCTK files
+        os.makedirs(cls.directory + "VCTK/")
+        os.makedirs(cls.directory + "VCTK/wav48/")
+        os.makedirs(cls.directory + "VCTK/wav48/p225/")
+        os.makedirs(cls.directory + "VCTK/txt/")
+        os.makedirs(cls.directory + "VCTK/txt/p225/")
+        text_file = cls.directory + "VCTK/txt/p225/p225_001.txt"
+        with open(text_file, "w") as f:
+            f.write("Please call Stella.\n")
+        text_file = cls.directory + "VCTK/txt/p225/p225_002.txt"
+        with open(text_file, "w") as f:
+            f.write("Ask her to bring these things with her from the store.")
+        # Create empty audio files
+        open(cls.directory + "VCTK/wav48/p225/p225_001.wav", 'a').close()
+        open(cls.directory + "VCTK/wav48/p225/p225_002.wav", 'a').close()
+
+
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.directory)
@@ -128,6 +145,16 @@ class TestDataProcessor(unittest.TestCase):
                                 "Vystadial_2013/data_voip_en/dev/jurcic-028-121024_234433_0013625_0013836.wav",
                                 "alright thank you and goodbye"]
                                ])
+
+    def test_get_data_vctk(self):
+        data_processor = dataprocessor.DataProcessor(self.directory + "VCTK")
+        test_set = data_processor.get_dataset()
+        self.assertCountEqual(test_set,
+                              [[self.directory + "VCTK/wav48/p225/p225_001.wav",
+                                "please call stella"],
+                               [self.directory + "VCTK/wav48/p225/p225_002.wav",
+                               "ask her to bring these things with her from the store"]]
+                              )
 
     def test_get_str_labels_and_reverse(self):
         text = "What ! I'm not looking for... I'll do it..."

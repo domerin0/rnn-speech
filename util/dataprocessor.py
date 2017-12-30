@@ -31,6 +31,8 @@ class DataProcessor(object):
                 self.data += self.get_data_tedlium(path)
             elif data_type == "LibriSpeech":
                 self.data += self.get_data_librispeech(path)
+            elif data_type == "VCTK":
+                self.data += self.get_data_vctk(path)
             else:
                 raise Exception("ERROR : unknown training_dataset_type")
 
@@ -197,6 +199,10 @@ class DataProcessor(object):
         files = cls.find_files(raw_data_path, "^.*\.trans\.txt$")
         if files:
             return "LibriSpeech"
+        # Check for ".wav" files with a naming pattern pxxx_xxx.wav where x are numbers
+        files = cls.find_files(raw_data_path, "^p[0-9]{3}_[0-9]{3}\.wav$")
+        if files:
+            return "VCTK"
         return "Unrecognized"
 
     @staticmethod
@@ -207,8 +213,9 @@ class DataProcessor(object):
             files_list.extend([os.path.join(root, file) for file in files if reg_expr.match(file)])
         return files_list
 
-    def get_data_librispeech(self, raw_data_path):
-        text_files = self.find_files(raw_data_path, "^.*\.txt$")
+    @classmethod
+    def get_data_librispeech(cls, raw_data_path):
+        text_files = cls.find_files(raw_data_path, "^.*\.txt$")
         result = []
         for text_file in text_files:
             directory = os.path.dirname(text_file)
@@ -221,11 +228,12 @@ class DataProcessor(object):
                         break
                     audio_file = directory + "/" + head + ".flac"
                     if os.path.exists(audio_file):
-                        result.append([audio_file, self.clean_label(line.replace(head, ""))])
+                        result.append([audio_file, cls.clean_label(line.replace(head, ""))])
         return result
 
-    def get_data_shtooka(self, raw_data_path):
-        text_files = self.find_files(raw_data_path, "^.*\.txt$")
+    @classmethod
+    def get_data_shtooka(cls, raw_data_path):
+        text_files = cls.find_files(raw_data_path, "^.*\.txt$")
         # Build from index_tags
         result = []
         for file in text_files:
@@ -236,22 +244,24 @@ class DataProcessor(object):
                 for section in config.sections():
                     audio_file = root + section
                     if os.path.exists(audio_file):
-                        result.append([audio_file, self.clean_label(config[section]['SWAC_TEXT'])])
+                        result.append([audio_file, cls.clean_label(config[section]['SWAC_TEXT'])])
         return result
 
-    def get_data_vystadial_2013(self, raw_data_path):
-        wav_audio_files = self.find_files(raw_data_path, "^.*\.wav$")
+    @classmethod
+    def get_data_vystadial_2013(cls, raw_data_path):
+        wav_audio_files = cls.find_files(raw_data_path, "^.*\.wav$")
         # Build from index_tags
         result = []
         for file in wav_audio_files:
             if os.path.exists(file + ".trn"):
                 with open(file + ".trn", "r") as f:
                     words = f.readline()
-                    result.append([file, self.clean_label(words)])
+                    result.append([file, cls.clean_label(words)])
         return result
 
-    def get_data_tedlium(self, raw_data_path):
-        stm_files = self.find_files(raw_data_path, "^.*\.stm$")
+    @classmethod
+    def get_data_tedlium(cls, raw_data_path):
+        stm_files = cls.find_files(raw_data_path, "^.*\.stm$")
         # Build from index_tags
         result = []
         for file in stm_files:
@@ -269,9 +279,21 @@ class DataProcessor(object):
                         wav_file = directory + "/../sph/{0}_{1}.wav".format(line_list[0], start)
                         extract_result = None
                         if not os.path.exists(wav_file):
-                            extract_result = self.extract_wav_from_sph(sph_file, wav_file, start, end)
+                            extract_result = cls.extract_wav_from_sph(sph_file, wav_file, start, end)
                         if extract_result is not False:
-                            result.append([wav_file, self.clean_label(line_list[6])])
+                            result.append([wav_file, cls.clean_label(line_list[6])])
+        return result
+
+    @classmethod
+    def get_data_vctk(cls, raw_data_path):
+        wav_audio_files = cls.find_files(raw_data_path, "^p[0-9]{3}_[0-9]{3}\.wav$")
+        result = []
+        for file in wav_audio_files:
+            txt_file = file.replace("wav48", "txt").replace(".wav", ".txt")
+            if os.path.exists(txt_file):
+                with open(txt_file, "r") as f:
+                    words = f.readline()
+                    result.append([file, cls.clean_label(words)])
         return result
 
     @staticmethod
