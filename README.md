@@ -62,7 +62,7 @@ version of TensorFlow.
 1. sox (for live transcript only, install with `sudo apt-get install sox` or `brew install sox --with-flac`)
 1. libcupti (for timeline only, install with : `sudo apt-get install libcupti-dev`)
 1. pyaudio (for live transcript only, install with : `sudo apt-get install python3-pyaudio`)
-
+1. mutagen (for scanning dataset files size, install with : `sudo apt-get install python3-mutagen`)
 
 #### Run data preparation Script
 

@@ -46,6 +46,10 @@ def main():
         evaluate(hyper_params)
     elif prog_params['generate_text'] is True:
         generate_text(hyper_params)
+    elif prog_params['scan_input_data'] is True:
+        train_set, test_set = speech_reco.load_acoustic_dataset(hyper_params["training_dataset_dirs"],
+                                                                hyper_params["test_dataset_dirs"])
+        scan_input_data(train_set, test_set)
 
 
 def build_language_training_rnn(sess, hyper_params, prog_params, train_set, test_set):
@@ -53,19 +57,21 @@ def build_language_training_rnn(sess, hyper_params, prog_params, train_set, test
                           hyper_params["max_input_seq_length"], hyper_params["max_target_seq_length"],
                           hyper_params["char_map_length"])
 
-    # Create a Dataset from the train_set and the test_set
+    # Create a Dataset from the train_set
     train_dataset = model.build_dataset(train_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
                                         hyper_params["char_map"])
 
     v_iterator = None
     if test_set is []:
+        # Only add the train dataset to the model
         t_iterator = model.add_dataset_input(train_dataset)
         sess.run(t_iterator.initializer)
     else:
+        # Create a Dataset from the test_set
         test_dataset = model.build_dataset(test_set, hyper_params["batch_size"], hyper_params["max_input_seq_length"],
                                            hyper_params["char_map"])
 
-        # Build the input stream from the different datasets
+        # Add the train and test datasets to the model
         t_iterator, v_iterator = model.add_datasets_input(train_dataset, test_dataset)
         sess.run(t_iterator.initializer)
         sess.run(v_iterator.initializer)
@@ -156,8 +162,8 @@ def train_language_rnn(train_set, test_set, hyper_params, prog_params):
 
     with tf.Session(config=config) as sess:
         # Initialize the model
-        model, t_iterator, v_iterator = build_language_training_rnn(sess, hyper_params, prog_params,
-                                                                    train_set, test_set)
+        _, _, _ = build_language_training_rnn(sess, hyper_params, prog_params,
+                                              train_set, test_set)
 
     return
 
@@ -278,7 +284,62 @@ def generate_text(hyper_params):
             prediction = model.process_input(sess, feat_vec, [1])
             text = dataprocessor.DataProcessor.get_labels_str(hyper_params["char_map"], prediction[0])
         print(text)
+    return
+
+
+def _add_audio_length_on_file(audio_file, text):
+    import mutagen
+
+    file = mutagen.File(audio_file)
+    try:
+        length = file.info.length
+    except AttributeError:
+        # In case the type was not recognized by mutagen
+        logging.warning("Audio file incorrect : %s", audio_file)
+        length = 0
+    return [audio_file, text, round(length, 1), int(length // audioprocessor.FRAME_STRIDE) + 1]
+
+
+def scan_input_data(train_set, test_set=None):
+    # Check for needed modules
+    import os
+    try:
+        import mutagen
+        import csv
+        from multiprocessing import Pool
+    except ImportError:
+        print("Mutagen, csv and multiprocessing modules are mandatory for 'scan_input_data' option")
         return
+
+    # Check that output files does not exists
+    if os.path.exists("training.csv"):
+        print("File 'training.csv' already exists. Please delete or rename.")
+        return
+    if test_set is not None and os.path.exists("test.csv"):
+        print("File 'test.csv' already exists. Please delete or rename.")
+        return
+
+    print("Start scanning. This could take a while...")
+    with Pool(5) as p:
+        train_set_result = p.starmap(_add_audio_length_on_file, train_set)
+        test_set_result = p.starmap(_add_audio_length_on_file, test_set)
+
+    print("Writing result on disk.")
+    train_set_result = sorted(train_set_result, key=lambda x: x[3], reverse=True)
+    with open("training.csv", 'w') as f:
+        wr = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        wr.writerow(["Audio file", "Label", "Duration (in seconds)", "Recommended value for 'max_input_seq_length'"])
+        wr.writerows(train_set_result)
+    print("Data written in 'training.csv' file, recommended 'max_input_seq_length' is : ", train_set_result[0][3])
+    if test_set is not None:
+        test_set_result = sorted(test_set_result, key=lambda x: x[3], reverse=True)
+        with open("test.csv", 'w') as f:
+            wr = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+            wr.writerow(["Audio file", "Label", "Duration (in seconds)",
+                         "Recommended value for 'max_input_seq_length'"])
+            wr.writerows(test_set_result)
+        print("Data written in 'test.csv' file, recommended 'max_input_seq_length' is : ", test_set_result[0][3])
+    return
 
 
 def evaluate(hyper_params):
@@ -376,6 +437,8 @@ def parse_args():
     group.set_defaults(file=None)
     group.set_defaults(record=False)
     group.set_defaults(evaluate=False)
+    group.set_defaults(generate_text=False)
+    group.set_defaults(scan_input_data=False)
     group.add_argument('--train_acoustic', dest='train_acoustic', action='store_true',
                        help='Train the acoustic network')
     group.add_argument('--train_language', dest='train_language', action='store_true',
@@ -385,12 +448,16 @@ def parse_args():
     group.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate WER against the test_set')
     group.add_argument('--generate_text', dest='generate_text', action='store_true', help='Generate text from the '
                                                                                           'language model')
+    group.add_argument('--scan_input_data', dest='scan_input_data', action='store_true',
+                       help='Scan training and test data and produce two csv files with'
+                            'the duration of each audio file.')
 
     args = parser.parse_args()
     prog_params = {'config_file': args.config, 'tb_name': args.tb_name, 'max_epoch': args.max_epoch,
                    'learn_rate': args.learn_rate, 'timeline': args.timeline, 'train_acoustic': args.train_acoustic,
                    'train_language': args.train_language, 'file': args.file, 'record': args.record,
-                   'evaluate': args.evaluate, 'generate_text': args.generate_text, 'XLA': args.XLA}
+                   'evaluate': args.evaluate, 'generate_text': args.generate_text,
+                   'scan_input_data': args.scan_input_data, 'XLA': args.XLA}
     return prog_params
 
 
