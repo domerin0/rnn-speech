@@ -312,7 +312,7 @@ def scan_input_data(train_set, test_set=None):
         return
 
     print("Start scanning. This could take a while...")
-    with Pool(5) as p:
+    with Pool(1) as p:
         train_set_result = p.starmap(_add_audio_length_on_file, train_set)
         test_set_result = p.starmap(_add_audio_length_on_file, test_set)
 
