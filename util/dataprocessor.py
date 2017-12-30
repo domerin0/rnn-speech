@@ -69,6 +69,7 @@ class DataProcessor(object):
         _str = _str.replace("_", " ")
         _str = _str.replace("(", " ")
         _str = _str.replace(")", " ")
+        _str = _str.replace("\"", " ")
         _str = _str.replace("  ", " ")
         _str = _str.strip()
         return _str
