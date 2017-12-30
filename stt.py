@@ -13,6 +13,9 @@ import util.audioprocessor as audioprocessor
 import util.dataprocessor as dataprocessor
 import argparse
 import logging
+import os
+import csv
+from multiprocessing import Pool
 from random import shuffle
 import sys
 
@@ -288,29 +291,18 @@ def generate_text(hyper_params):
 
 
 def _add_audio_length_on_file(audio_file, text):
-    import mutagen
+    import librosa
 
-    file = mutagen.File(audio_file)
     try:
-        length = file.info.length
-    except AttributeError:
-        # In case the type was not recognized by mutagen
+        length = librosa.core.get_duration(filename=audio_file)
+    except FileNotFoundError:
+        # In case the type was not recognized
         logging.warning("Audio file incorrect : %s", audio_file)
         length = 0
     return [audio_file, text, round(length, 1), int(length // audioprocessor.FRAME_STRIDE) + 1]
 
 
 def scan_input_data(train_set, test_set=None):
-    # Check for needed modules
-    import os
-    try:
-        import mutagen
-        import csv
-        from multiprocessing import Pool
-    except ImportError:
-        print("Mutagen, csv and multiprocessing modules are mandatory for 'scan_input_data' option")
-        return
-
     # Check that output files does not exists
     if os.path.exists("training.csv"):
         print("File 'training.csv' already exists. Please delete or rename.")
