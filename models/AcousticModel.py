@@ -722,7 +722,7 @@ class AcousticModel(object):
         input_feat_vecs = []
         input_feat_vec_lengths = []
         labels = []
-        for file, label, _ in eval_dataset:
+        for file, label in eval_dataset:
             feat_vec, feat_vec_length = audio_processor.process_audio_file(file)
             file_number += 1
             label_data_length = len(label)
@@ -739,16 +739,21 @@ class AcousticModel(object):
             # If we reached the last file then pad the lists to obtain a full batch
             if file_number == len(eval_dataset):
                 for i in range(self.batch_size - len(input_feat_vecs)):
-                    input_feat_vecs.append(np.zeros([self.max_input_seq_length,
-                                                     audio_processor.feature_size]))
+                    input_feat_vecs.append(np.zeros([self.max_input_seq_length, audio_processor.feature_size]))
                     input_feat_vec_lengths.append(0)
                     labels.append("")
 
             if len(input_feat_vecs) == self.batch_size:
                 # Run the batch
                 logging.debug("Running a batch")
-                input_feat_vecs = np.swapaxes(input_feat_vecs, 0, 1)
-                predictions = self.process_input(sess, input_feat_vecs, input_feat_vec_lengths,
+
+                # Pad each input vector to the max size
+                padded_input_feat_vecs = [np.pad(feat_vec, ((0, self.max_input_seq_length - len(feat_vec)), (0, 0)),
+                                                 mode='constant', constant_values=0)
+                                          for feat_vec in input_feat_vecs]
+
+                padded_input_feat_vecs = np.swapaxes(padded_input_feat_vecs, 0, 1)
+                predictions = self.process_input(sess, padded_input_feat_vecs, input_feat_vec_lengths,
                                                  run_options=run_options, run_metadata=run_metadata)
                 for index, prediction in enumerate(predictions):
                     transcribed_text = dataprocessor.DataProcessor.get_labels_str(char_map, prediction)
