@@ -17,7 +17,6 @@ class TestAcousticModel(unittest.TestCase):
         cls.normalization = False
         cls.num_labels = 50
         cls.signal_processing = "fbank"
-        cls.input_keep_prob = 0.8
         cls.output_keep_prob = 0.5
         cls.grad_clip = 1
         cls.learning_rate = 0.0003
@@ -35,7 +34,7 @@ class TestAcousticModel(unittest.TestCase):
         with tf.Session():
             model = AcousticModel(self.num_layers, self.hidden_size, self.batch_size, self.max_input_seq_length,
                                   self.max_target_seq_length, self.input_dim, self.normalization, self.num_labels)
-            model.create_training_rnn(self.input_keep_prob, self.output_keep_prob, self.grad_clip,
+            model.create_training_rnn(self.output_keep_prob, self.grad_clip,
                                       self.learning_rate, self.lr_decay_factor)
 
     def test_create_training_rnn_with_iterators(self):
@@ -46,11 +45,11 @@ class TestAcousticModel(unittest.TestCase):
                                   self.max_target_seq_length, self.input_dim, self.normalization, self.num_labels)
 
             # Create a Dataset from the train_set and the test_set
-            train_dataset = model.build_dataset([["/file/path", "Test", 10]], self.batch_size,
+            train_dataset = model.build_dataset([["/file/path", "Test"]], self.batch_size,
                                                 self.max_input_seq_length, self.max_target_seq_length,
                                                 self.signal_processing, ENGLISH_CHAR_MAP)
             model.add_dataset_input(train_dataset)
-            model.create_training_rnn(self.input_keep_prob, self.output_keep_prob, self.grad_clip,
+            model.create_training_rnn(self.output_keep_prob, self.grad_clip,
                                       self.learning_rate, self.lr_decay_factor, use_iterator=True)
 
 

@@ -104,7 +104,6 @@ class TestDataProcessor(unittest.TestCase):
         open(cls.directory + "VCTK/wav48/p225/p225_001.wav", 'a').close()
         open(cls.directory + "VCTK/wav48/p225/p225_002.wav", 'a').close()
 
-
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.directory)

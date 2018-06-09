@@ -58,7 +58,7 @@ class LanguageModel(object):
         self.prediction = None
 
         # Create object's variables for placeholders
-        self.input_keep_prob_ph = self.output_keep_prob_ph = None
+        self.output_keep_prob_ph = None
         self.inputs_ph = self.input_seq_lengths_ph = self.labels_ph = None
 
         # Create object's variables for dataset's iterator input
@@ -69,7 +69,7 @@ class LanguageModel(object):
         self.rnn_tuple_state = None
 
         # Create object's variables for training
-        self.input_keep_prob = self.output_keep_prob = None
+        self.output_keep_prob = None
         self.global_step = None
         self.learning_rate_var = None
         # Create object variables for tensorflow training's ops
@@ -109,21 +109,20 @@ class LanguageModel(object):
 
         # Build the RNN
         self.global_step, logits, self.prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, \
-            _, _, self.rnn_tuple_state = self._build_base_rnn(self.inputs_ph, self.input_seq_lengths_ph, True)
+            _, self.rnn_tuple_state = self._build_base_rnn(self.inputs_ph, self.input_seq_lengths_ph, True)
 
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
 
         return logits
 
-    def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor,
+    def create_training_rnn(self, output_keep_prob, grad_clip, learning_rate, lr_decay_factor,
                             use_iterator=False):
         """
         Create the training RNN
 
         Parameters
         ----------
-        :param input_keep_prob: probability of keeping input signal for a cell during training
         :param output_keep_prob: probability of keeping output signal from a cell during training
         :param grad_clip: max gradient size (prevent exploding gradients)
         :param learning_rate: learning rate parameter fed to optimizer
@@ -135,7 +134,6 @@ class LanguageModel(object):
             logging.fatal("Trying to create the language RNN but it is already.")
 
         # Store model parameters
-        self.input_keep_prob = input_keep_prob
         self.output_keep_prob = output_keep_prob
 
         if use_iterator is True:
@@ -148,10 +146,8 @@ class LanguageModel(object):
             # Pad input_seq_lengths if the batch is not complete
             input_seq_lengths = tf.pad(input_lengths, [[0, self.batch_size - tf.size(input_lengths)]])
 
-            # Label tensor must be provided as a sparse tensor.
-            sparse_labels = tf.SparseTensor(label_batch[0], label_batch[1], [self.batch_size, label_batch[2][1]])
-            # Pad sparse_labels if the batch is not complete
-            sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, self.num_labels - 1)
+            # Label tensor from the iterator are sparse tensors already
+            sparse_labels = label_batch
         else:
             # Set placeholders for input
             self.inputs_ph = tf.placeholder(tf.int32, shape=[self.max_input_seq_length, None, self.input_dim],
@@ -171,7 +167,7 @@ class LanguageModel(object):
             sparse_labels = tf.SparseTensor(idx, tf.gather_nd(label_batch, idx),
                                             [self.batch_size, self.max_target_seq_length])
 
-        self.global_step, logits, prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, self.input_keep_prob_ph, \
+        self.global_step, logits, prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, \
             self.output_keep_prob_ph, self.rnn_tuple_state = self._build_base_rnn(inputs, input_seq_lengths, False)
 
         # Add the train part to the network
@@ -197,8 +193,6 @@ class LanguageModel(object):
         :returns prediction: the best prediction for the input
         :returns rnn_keep_state_op: a tensorflow op to save the RNN internal state for the next batch
         :returns rnn_state_zero_op: a tensorflow op to reset the RNN internal state to zeros
-        :returns input_keep_prob_ph: a placeholder for input_keep_prob of the dropout layer
-                                     (None if forward_only is True)
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
         :returns rnn_tuple_state: the RNN internal state
@@ -207,11 +201,10 @@ class LanguageModel(object):
         global_step = tf.Variable(0, trainable=False, name='global_step')
 
         # If building the RNN for training then create dropout rate placeholders
-        input_keep_prob_ph = output_keep_prob_ph = None
+        output_keep_prob_ph = None
         if not forward_only:
             with tf.name_scope('dropout'):
-                # Create placeholders, used to override values when running on the test set
-                input_keep_prob_ph = tf.placeholder(tf.float32)
+                # Create placeholder, used to override values when running on the test set
                 output_keep_prob_ph = tf.placeholder(tf.float32)
 
         # Define cells of language model
@@ -224,8 +217,7 @@ class LanguageModel(object):
                 # If building the RNN for training then add a dropoutWrapper to the cells
                 if not forward_only:
                     with tf.name_scope('dropout'):
-                        cell = tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=input_keep_prob_ph,
-                                                             output_keep_prob=output_keep_prob_ph)
+                        cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=output_keep_prob_ph)
                 layers_list.append(cell)
 
             # Store the layers in a multi-layer RNN
@@ -300,7 +292,7 @@ class LanguageModel(object):
         prediction = tf.to_int32(decoded[0])
 
         return global_step, logits, prediction, rnn_keep_state_op, rnn_state_zero_op, \
-            input_keep_prob_ph, output_keep_prob_ph, rnn_tuple_state
+            output_keep_prob_ph, rnn_tuple_state
 
     def _add_training_on_rnn(self, logits, grad_clip, learning_rate, lr_decay_factor,
                              sparse_labels, input_seq_lengths, prediction):
@@ -526,11 +518,10 @@ class LanguageModel(object):
             # Add the update operation
             output_feed.append(self.accumulate_gradients_op)
             # and feed the dropout layer the keep probability values
-            input_feed = {self.input_keep_prob_ph: self.input_keep_prob,
-                          self.output_keep_prob_ph: self.output_keep_prob}
+            input_feed = {self.output_keep_prob_ph: self.output_keep_prob}
         else:
             # No need to apply a dropout, set the keep probability to 1.0
-            input_feed = {self.input_keep_prob_ph: 1.0, self.output_keep_prob_ph: 1.0}
+            input_feed = {self.output_keep_prob_ph: 1.0}
 
         # Actually run the tensorflow session
         start_time = time.time()
@@ -590,8 +581,7 @@ class LanguageModel(object):
         """
         input_feed = {self.inputs_ph: np.array(inputs), self.input_seq_lengths_ph: np.array(input_seq_lengths)}
 
-        if (self.input_keep_prob_ph is not None) and (self.output_keep_prob_ph is not None):
-            input_feed[self.input_keep_prob_ph] = 1.0
+        if self.output_keep_prob_ph is not None:
             input_feed[self.output_keep_prob_ph] = 1.0
 
         output_feed = [self.prediction]

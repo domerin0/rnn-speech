@@ -61,7 +61,7 @@ class AcousticModel(object):
         self.prediction = None
 
         # Create object's variables for placeholders
-        self.input_keep_prob_ph = self.output_keep_prob_ph = None
+        self.output_keep_prob_ph = None
         self.inputs_ph = self.input_seq_lengths_ph = self.labels_ph = None
 
         # Create object's variables for dataset's iterator input
@@ -72,7 +72,7 @@ class AcousticModel(object):
         self.rnn_tuple_state = None
 
         # Create object's variables for training
-        self.input_keep_prob = self.output_keep_prob = None
+        self.output_keep_prob = None
         self.global_step = None
         self.learning_rate_var = None
         # Create object variables for tensorflow training's ops
@@ -112,21 +112,20 @@ class AcousticModel(object):
 
         # Build the RNN
         self.global_step, logits, self.prediction, self.rnn_keep_state_op, self.rnn_state_zero_op,\
-            _, _, self.rnn_tuple_state = self._build_base_rnn(self.inputs_ph, self.input_seq_lengths_ph, True)
+            _, self.rnn_tuple_state = self._build_base_rnn(self.inputs_ph, self.input_seq_lengths_ph, True)
 
         # Add the saving and restore operation
         self.saver_op = self._add_saving_op()
 
         return logits
 
-    def create_training_rnn(self, input_keep_prob, output_keep_prob, grad_clip, learning_rate, lr_decay_factor,
+    def create_training_rnn(self, output_keep_prob, grad_clip, learning_rate, lr_decay_factor,
                             use_iterator=False):
         """
         Create the training RNN
 
         Parameters
         ----------
-        :param input_keep_prob: probability of keeping input signal for a cell during training
         :param output_keep_prob: probability of keeping output signal from a cell during training
         :param grad_clip: max gradient size (prevent exploding gradients)
         :param learning_rate: learning rate parameter fed to optimizer
@@ -138,7 +137,6 @@ class AcousticModel(object):
             logging.fatal("Trying to create the acoustic RNN but it is already.")
 
         # Store model parameters
-        self.input_keep_prob = input_keep_prob
         self.output_keep_prob = output_keep_prob
 
         if use_iterator is True:
@@ -176,7 +174,7 @@ class AcousticModel(object):
             sparse_labels = tf.SparseTensor(idx, tf.gather_nd(label_batch, idx),
                                             [self.batch_size, self.max_target_seq_length])
 
-        self.global_step, logits, prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, self.input_keep_prob_ph,\
+        self.global_step, logits, prediction, self.rnn_keep_state_op, self.rnn_state_zero_op, \
             self.output_keep_prob_ph, self.rnn_tuple_state = self._build_base_rnn(inputs, input_seq_lengths, False)
 
         # Add the train part to the network
@@ -202,8 +200,6 @@ class AcousticModel(object):
         :returns prediction: the best prediction for the input
         :returns rnn_keep_state_op: a tensorflow op to save the RNN internal state for the next batch
         :returns rnn_state_zero_op: a tensorflow op to reset the RNN internal state to zeros
-        :returns input_keep_prob_ph: a placeholder for input_keep_prob of the dropout layer
-                                     (None if forward_only is True)
         :returns output_keep_prob_ph: a placeholder for output_keep_prob of the dropout layer
                                       (None if forward_only is True)
         :returns rnn_tuple_state: the RNN internal state
@@ -214,12 +210,11 @@ class AcousticModel(object):
         # Properly define each dim of the rnn_inputs for the dynamic_rnn
         rnn_inputs.set_shape([self.max_input_seq_length, self.batch_size, self.input_dim])
 
-        # If building the RNN for training then create dropout rate placeholders
-        input_keep_prob_ph = output_keep_prob_ph = None
+        # If building the RNN for training then create dropout rate placeholder
+        output_keep_prob_ph = None
         if not forward_only:
             with tf.name_scope('dropout'):
-                # Create placeholders, used to override values when running on the test set
-                input_keep_prob_ph = tf.placeholder(tf.float32)
+                # Create placeholder, used to override values when running on the test set
                 output_keep_prob_ph = tf.placeholder(tf.float32)
 
         # Add a batch normalization layer to the model if needed
@@ -235,14 +230,15 @@ class AcousticModel(object):
         with tf.variable_scope('LSTM'):
             # Create each layer
             layers_list = []
-            for _ in range(self.num_layers):
+            for i in range(self.num_layers):
                 cell = tf.contrib.rnn.BasicLSTMCell(self.hidden_size, state_is_tuple=True)
 
                 # If building the RNN for training then add a dropoutWrapper to the cells
                 if not forward_only:
                     with tf.name_scope('dropout'):
-                        cell = tf.contrib.rnn.DropoutWrapper(cell, input_keep_prob=input_keep_prob_ph,
-                                                             output_keep_prob=output_keep_prob_ph)
+                        output_keep_prob = tf.minimum(1.0, tf.add(output_keep_prob_ph,
+                                                                  (0.2 * (self.num_layers - i - 1))))
+                        cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=output_keep_prob)
                 layers_list.append(cell)
 
             # Store the layers in a multi-layer RNN
@@ -306,7 +302,7 @@ class AcousticModel(object):
         prediction = tf.to_int32(decoded[0])
 
         return global_step, logits, prediction, rnn_keep_state_op, rnn_state_zero_op,\
-            input_keep_prob_ph, output_keep_prob_ph, rnn_tuple_state
+            output_keep_prob_ph, rnn_tuple_state
 
     def _add_training_on_rnn(self, logits, grad_clip, learning_rate, lr_decay_factor,
                              sparse_labels, input_seq_lengths, prediction):
@@ -636,11 +632,10 @@ class AcousticModel(object):
             # Add the update operation
             output_feed.append(self.accumulate_gradients_op)
             # and feed the dropout layer the keep probability values
-            input_feed = {self.input_keep_prob_ph: self.input_keep_prob,
-                          self.output_keep_prob_ph: self.output_keep_prob}
+            input_feed = {self.output_keep_prob_ph: self.output_keep_prob}
         else:
             # No need to apply a dropout, set the keep probability to 1.0
-            input_feed = {self.input_keep_prob_ph: 1.0, self.output_keep_prob_ph: 1.0}
+            input_feed = {self.output_keep_prob_ph: 1.0}
 
         # Actually run the tensorflow session
         start_time = time.time()
@@ -700,8 +695,7 @@ class AcousticModel(object):
         """
         input_feed = {self.inputs_ph: np.array(inputs), self.input_seq_lengths_ph: np.array(input_seq_lengths)}
 
-        if (self.input_keep_prob_ph is not None) and (self.output_keep_prob_ph is not None):
-            input_feed[self.input_keep_prob_ph] = 1.0
+        if self.output_keep_prob_ph is not None:
             input_feed[self.output_keep_prob_ph] = 1.0
 
         output_feed = [self.prediction]

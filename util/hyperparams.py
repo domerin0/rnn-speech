@@ -7,10 +7,7 @@ import os
 import pickle
 import time
 import logging
-try:
-    import ConfigParser as configparser
-except ImportError:
-    import configparser
+import configparser
 
 
 class HyperParameterHandler(object):
@@ -104,7 +101,6 @@ class HyperParameterHandler(object):
         log_section = "logging"
         dic["num_layers"] = config.getint(acoustic_section, "num_layers")
         dic["hidden_size"] = config.getint(acoustic_section, "hidden_size")
-        dic["dropout_input_keep_prob"] = config.getfloat(acoustic_section, "dropout_input_keep_prob")
         dic["dropout_output_keep_prob"] = config.getfloat(acoustic_section, "dropout_output_keep_prob")
         dic["batch_size"] = config.getint(acoustic_section, "batch_size")
         dic["mini_batch_size"] = config.getint(acoustic_section, "mini_batch_size")

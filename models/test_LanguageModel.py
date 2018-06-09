@@ -16,7 +16,6 @@ class TestLanguageModel(unittest.TestCase):
         cls.max_input_seq_length = 1800
         cls.max_target_seq_length = 600
         cls.input_dim = len(ENGLISH_CHAR_MAP)  # For 1-hot encoding of chars
-        cls.input_keep_prob = 0.8
         cls.output_keep_prob = 0.5
         cls.grad_clip = 1
         cls.learning_rate = 0.0003
@@ -34,8 +33,7 @@ class TestLanguageModel(unittest.TestCase):
         with tf.Session():
             model = LanguageModel(self.num_layers, self.hidden_size, self.batch_size, self.max_input_seq_length,
                                   self.max_target_seq_length, self.input_dim)
-            model.create_training_rnn(self.input_keep_prob, self.output_keep_prob, self.grad_clip,
-                                      self.learning_rate, self.lr_decay_factor)
+            model.create_training_rnn(self.output_keep_prob, self.grad_clip, self.learning_rate, self.lr_decay_factor)
 
     def test_build_dataset(self):
         tf.reset_default_graph()
@@ -84,7 +82,7 @@ class TestLanguageModel(unittest.TestCase):
             train_dataset = model.build_dataset(["the brown lazy fox", "the red quick fox"], self.batch_size,
                                                 self.max_input_seq_length, ENGLISH_CHAR_MAP)
             model.add_dataset_input(train_dataset)
-            model.create_training_rnn(self.input_keep_prob, self.output_keep_prob, self.grad_clip,
+            model.create_training_rnn(self.output_keep_prob, self.grad_clip,
                                       self.learning_rate, self.lr_decay_factor, use_iterator=True)
 
 

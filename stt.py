@@ -80,9 +80,8 @@ def build_language_training_rnn(sess, hyper_params, prog_params, train_set, test
         sess.run(v_iterator.initializer)
 
     # Create the model
-    model.create_training_rnn(hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
-                              hyper_params["grad_clip"], hyper_params["learning_rate"],
-                              hyper_params["lr_decay_factor"], use_iterator=True)
+    model.create_training_rnn(hyper_params["dropout_output_keep_prob"], hyper_params["grad_clip"],
+                              hyper_params["learning_rate"], hyper_params["lr_decay_factor"], use_iterator=True)
     model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
     model.initialize(sess)
     model.restore(sess, hyper_params["checkpoint_dir"] + "/language/")
@@ -120,9 +119,8 @@ def build_acoustic_training_rnn(sess, hyper_params, prog_params, train_set, test
         sess.run(v_iterator.initializer)
 
     # Create the model
-    model.create_training_rnn(hyper_params["dropout_input_keep_prob"], hyper_params["dropout_output_keep_prob"],
-                              hyper_params["grad_clip"], hyper_params["learning_rate"],
-                              hyper_params["lr_decay_factor"], use_iterator=True)
+    model.create_training_rnn(hyper_params["dropout_output_keep_prob"], hyper_params["grad_clip"],
+                              hyper_params["learning_rate"], hyper_params["lr_decay_factor"], use_iterator=True)
     model.add_tensorboard(sess, hyper_params["tensorboard_dir"], prog_params["tb_name"], prog_params["timeline"])
     model.initialize(sess)
     model.restore(sess, hyper_params["checkpoint_dir"] + "/acoustic/")
@@ -424,18 +422,11 @@ def parse_args():
     parser.add_argument('--XLA', dest='XLA', action='store_true', help='Activate XLA mode in tensorflow')
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.set_defaults(train_acoustic=False)
-    group.set_defaults(train_language=False)
-    group.set_defaults(file=None)
-    group.set_defaults(record=False)
-    group.set_defaults(evaluate=False)
-    group.set_defaults(generate_text=False)
-    group.set_defaults(scan_input_data=False)
     group.add_argument('--train_acoustic', dest='train_acoustic', action='store_true',
                        help='Train the acoustic network')
     group.add_argument('--train_language', dest='train_language', action='store_true',
                        help='Train the language network')
-    group.add_argument('--file', type=str, help='Path to a wav file to process')
+    group.add_argument('--file', type=str, default=None, help='Path to a wav file to process')
     group.add_argument('--record', dest='record', action='store_true', help='Record and write result on the fly')
     group.add_argument('--evaluate', dest='evaluate', action='store_true', help='Evaluate WER against the test_set')
     group.add_argument('--generate_text', dest='generate_text', action='store_true', help='Generate text from the '

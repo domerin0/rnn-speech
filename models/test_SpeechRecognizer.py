@@ -1,7 +1,6 @@
 # coding=utf-8
 import unittest
 from models.SpeechRecognizer import SpeechRecognizer
-import util.dataprocessor as dataprocessor
 import tensorflow as tf
 
 
