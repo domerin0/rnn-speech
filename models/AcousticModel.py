@@ -149,12 +149,8 @@ class AcousticModel(object):
             # Pad input_seq_lengths if the batch is not complete
             input_seq_lengths = tf.pad(input_lengths, [[0, self.batch_size - tf.size(input_lengths)]])
 
-            # Label tensor must be provided as a sparse tensor.
-            idx = tf.where(tf.not_equal(label_batch, 0))
-            sparse_labels = tf.SparseTensor(idx, tf.gather_nd(label_batch, idx),
-                                            [self.batch_size, self.max_target_seq_length])
-            # Pad sparse_labels if the batch is not complete
-            sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, self.num_labels - 1)
+            # Label tensor are a sparse tensor already
+            sparse_labels = label_batch
         else:
             # Set placeholders for input
             self.inputs_ph = tf.placeholder(tf.float32, shape=[self.max_input_seq_length, None, self.input_dim],
@@ -789,7 +785,7 @@ class AcousticModel(object):
         return mean_loss, mean_error_rate, current_step
 
     @staticmethod
-    def build_dataset(input_set, batch_size, max_input_seq_length, _max_target_seq_length,
+    def build_dataset(input_set, batch_size, max_input_seq_length, max_target_seq_length,
                       signal_processing, char_map):
         audio_dataset = tf.data.Dataset.from_tensor_slices(input_set)
 
@@ -820,18 +816,18 @@ class AcousticModel(object):
         audio_dataset = audio_dataset.padded_batch(batch_size, padded_shapes=([max_input_seq_length, None],
                                                                               tf.TensorShape([]),
                                                                               [None]))
-        # Prefetch some data
-        audio_dataset = audio_dataset.prefetch(5)
-        # Convert the labels' batch to a sparse tensor
-        # TODO : support will probably be ok with TF v1.5
-        # def _convert_labels_to_sparse(audio, audio_lengths, dense_labels):
-        #    idx = tf.where(tf.not_equal(dense_labels, 0))
-        #    sparse_labels = tf.SparseTensor(idx, tf.gather_nd(dense_labels, idx), [max_target_seq_length, batch_size])
-        #    return audio, audio_lengths, sparse_labels
-        # audio_dataset = audio_dataset.map(_convert_labels_to_sparse)
 
-        # TODO : add a filter for files which are too long (currently de-structuring with Dataset.filter is not
-        #        supported in python3)
+        # Convert the labels' batch to a sparse tensor
+        def _convert_labels_to_sparse(audio, audio_lengths, dense_labels):
+            idx = tf.where(tf.not_equal(dense_labels, 0))
+            sparse_labels = tf.SparseTensor(idx, tf.gather_nd(dense_labels, idx), [batch_size, max_target_seq_length])
+            # Pad sparse_labels if the batch is not complete
+            sparse_labels, _ = tf.sparse_fill_empty_rows(sparse_labels, len(char_map) - 1)
+            return audio, audio_lengths, sparse_labels
+        audio_dataset = audio_dataset.map(_convert_labels_to_sparse)
+
+        # Prefetch some data
+        audio_dataset = audio_dataset.prefetch(batch_size)
 
         return audio_dataset
 
